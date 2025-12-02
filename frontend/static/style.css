@@ -2398,7 +2398,7 @@ header h1 {
     cursor: pointer;
     pointer-events: auto;
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0);
+    transform: translate(calc(-50% + var(--item-x)), calc(-50% + var(--item-y))) scale(0);
     transition: all 0.5s cubic-bezier(0.68, -0.6, 0.32, 1.6);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(var(--accent-rgb), 0.3);
     backdrop-filter: blur(10px);
