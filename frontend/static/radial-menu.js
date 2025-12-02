@@ -1,15 +1,17 @@
 /**
- * Voice Agent - Radial Menu Module
- * Inspired by CodePen: https://codepen.io/gzuzkstro/pen/oemMyN
- * Circular navigation with animated bubbles around the orb
+ * Voice Agent - Radial Menu Module (Advanced)
+ * Smooth elastic animations with magnetic pointer tracking
  */
 
-// Menu configuration
+// Menu configuration - single source of truth
 const CONFIG = {
-    radius: 160,          // Distance from center to items
-    itemSize: 56,         // Size of menu items
-    animDuration: 400,    // Animation duration in ms
-    staggerDelay: 50,     // Delay between each item animation
+    radius: 140,              // Distance from center to items
+    itemSize: 56,             // Size of menu items
+    animDuration: 500,        // Base animation duration in ms
+    staggerDelay: 60,         // Delay between each item animation
+    pointerLerp: 0.18,        // Pointer interpolation speed (0-1, lower = smoother)
+    magneticRadius: 80,       // Distance at which items "pull" the pointer
+    magneticStrength: 0.4,    // How strong the magnetic pull is
 };
 
 // Menu actions configuration
@@ -57,8 +59,16 @@ let isOpen = false;
 let menuEl = null;
 let toggleEl = null;
 let pointerEl = null;
+let linesEl = null;
+let descriptionEl = null;
 let sendMessageFn = null;
 let activeItem = null;
+
+// Pointer animation state
+let pointerTarget = { x: 0, y: 0 };
+let pointerCurrent = { x: 0, y: 0 };
+let pointerAnimationFrame = null;
+let items = [];
 
 /**
  * Initialize the radial menu
@@ -71,14 +81,16 @@ export function initRadialMenu(sendMessage) {
     menuEl = document.getElementById('radialMenu');
     toggleEl = document.getElementById('radialToggle');
     pointerEl = document.getElementById('radialPointer');
+    descriptionEl = document.getElementById('radialDescription');
+    linesEl = menuEl?.querySelector('.radial-lines');
     
     if (!menuEl || !toggleEl) {
         console.warn('Radial menu elements not found');
         return;
     }
     
-    // Position items in a circle and store their positions
-    positionItems();
+    // Position items and cache their data
+    items = positionItems();
     
     // Setup event listeners
     setupEventListeners();
@@ -86,7 +98,7 @@ export function initRadialMenu(sendMessage) {
     // Add ripple effect to items
     addRippleEffects();
     
-    console.log('Radial menu initialized');
+    console.log('Radial menu initialized with', items.length, 'items');
 }
 
 /**
@@ -108,10 +120,18 @@ function setupEventListeners() {
     items.forEach((item) => {
         item.addEventListener('click', (e) => handleItemClick(e));
         
-        // Hover effect - move pointer toward item
+        // Hover effect - move pointer toward item and show description
         item.addEventListener('mouseenter', () => {
             if (isOpen) {
                 movePointerToItem(item);
+                showDescription(item);
+            }
+        });
+        
+        // Hide description on mouse leave
+        item.addEventListener('mouseleave', () => {
+            if (isOpen) {
+                hideDescription();
             }
         });
         
@@ -141,49 +161,217 @@ function setupEventListeners() {
 }
 
 /**
- * Position items in a circle and store coordinates
+ * Position items in a circle and cache all data
+ * Returns array of item data for efficient access
  */
 function positionItems() {
-    const items = document.querySelectorAll('.radial-item');
-    const count = items.length;
-    const startAngle = -90; // Start from top
+    const itemElements = document.querySelectorAll('.radial-item');
+    const count = itemElements.length;
+    const startAngle = -90; // Start from top (-90 degrees = 12 o'clock)
     const angleStep = 360 / count;
     
-    items.forEach((item, index) => {
+    const itemsData = [];
+    
+    itemElements.forEach((item, index) => {
         const angle = startAngle + (index * angleStep);
         const radian = (angle * Math.PI) / 180;
         
-        // Calculate position
+        // Calculate position on circle
         const x = Math.cos(radian) * CONFIG.radius;
         const y = Math.sin(radian) * CONFIG.radius;
         
-        // Store coordinates for pointer animation
+        // Store all data on element and in array
+        const itemData = {
+            element: item,
+            x,
+            y,
+            angle,
+            radian,
+            index
+        };
+        
         item.dataset.x = x;
         item.dataset.y = y;
         item.dataset.angle = angle;
+        item.dataset.index = index;
+        
+        // Apply position using CSS custom properties (for smooth animation)
+        item.style.setProperty('--item-x', `${x}px`);
+        item.style.setProperty('--item-y', `${y}px`);
+        
+        console.log(`Item ${index}: angle=${angle}°, x=${x.toFixed(1)}, y=${y.toFixed(1)}`);
+        
+        itemsData.push(itemData);
     });
+    
+    console.log(`Positioned ${itemsData.length} items in a circle with radius ${CONFIG.radius}px`);
+    
+    return itemsData;
+}
+
+/**
+ * Linear interpolation helper
+ */
+function lerp(start, end, factor) {
+    return start + (end - start) * factor;
+}
+
+/**
+ * Calculate distance between two points
+ */
+function distance(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Update pointer position with smooth interpolation
+ * Uses requestAnimationFrame for 60fps smooth motion
+ */
+function updatePointer() {
+    if (!pointerEl || !isOpen) {
+        if (pointerAnimationFrame) {
+            cancelAnimationFrame(pointerAnimationFrame);
+            pointerAnimationFrame = null;
+        }
+        return;
+    }
+    
+    // Smoothly interpolate current position toward target
+    pointerCurrent.x = lerp(pointerCurrent.x, pointerTarget.x, CONFIG.pointerLerp);
+    pointerCurrent.y = lerp(pointerCurrent.y, pointerTarget.y, CONFIG.pointerLerp);
+    
+    // Apply transform
+    pointerEl.style.transform = `translate(calc(-50% + ${pointerCurrent.x}px), calc(-50% + ${pointerCurrent.y}px))`;
+    
+    // Continue animation loop
+    pointerAnimationFrame = requestAnimationFrame(updatePointer);
+}
+
+/**
+ * Start pointer animation loop
+ */
+function startPointerAnimation() {
+    if (!pointerAnimationFrame) {
+        pointerAnimationFrame = requestAnimationFrame(updatePointer);
+    }
+}
+
+/**
+ * Stop pointer animation loop
+ */
+function stopPointerAnimation() {
+    if (pointerAnimationFrame) {
+        cancelAnimationFrame(pointerAnimationFrame);
+        pointerAnimationFrame = null;
+    }
+}
+
+/**
+ * Set pointer target position with optional magnetic attraction
+ * @param {number} targetX - Target X coordinate
+ * @param {number} targetY - Target Y coordinate
+ * @param {boolean} magnetic - Whether to apply magnetic snap
+ */
+function setPointerTarget(targetX, targetY, magnetic = true) {
+    if (!magnetic) {
+        pointerTarget.x = targetX;
+        pointerTarget.y = targetY;
+        return;
+    }
+    
+    // Find nearest item within magnetic radius
+    let nearestItem = null;
+    let nearestDist = Infinity;
+    
+    for (const itemData of items) {
+        const dist = distance(targetX, targetY, itemData.x, itemData.y);
+        if (dist < CONFIG.magneticRadius && dist < nearestDist) {
+            nearestDist = dist;
+            nearestItem = itemData;
+        }
+    }
+    
+    // If close to an item, pull pointer toward it
+    if (nearestItem) {
+        const pullFactor = 1 - (nearestDist / CONFIG.magneticRadius);
+        const magnetPull = CONFIG.magneticStrength * pullFactor;
+        
+        pointerTarget.x = lerp(targetX, nearestItem.x, magnetPull);
+        pointerTarget.y = lerp(targetY, nearestItem.y, magnetPull);
+    } else {
+        pointerTarget.x = targetX;
+        pointerTarget.y = targetY;
+    }
 }
 
 /**
  * Move pointer indicator toward an item on hover
  */
 function movePointerToItem(item) {
-    if (!pointerEl) return;
+    if (!pointerEl || !isOpen) return;
     
-    const x = parseFloat(item.dataset.x) || 0;
-    const y = parseFloat(item.dataset.y) || 0;
+    const itemData = items.find(i => i.element === item);
+    if (!itemData) return;
     
-    // Move pointer 75% of the way toward the item
+    // Move pointer 70% of the way toward the item
     const pointerRatio = 0.7;
-    pointerEl.style.transform = `translate(calc(-50% + ${x * pointerRatio}px), calc(-50% + ${y * pointerRatio}px))`;
+    setPointerTarget(itemData.x * pointerRatio, itemData.y * pointerRatio, false);
+    
+    // Highlight the connecting line
+    highlightLine(itemData.index);
+}
+
+/**
+ * Show description tooltip for an item
+ */
+function showDescription(item) {
+    if (!descriptionEl || !isOpen) return;
+    
+    const action = item.dataset.action;
+    const menuAction = MENU_ACTIONS.find(a => a.id === action);
+    
+    if (menuAction && menuAction.label) {
+        descriptionEl.textContent = menuAction.label;
+        descriptionEl.classList.add('visible');
+    }
+}
+
+/**
+ * Hide description tooltip
+ */
+function hideDescription() {
+    if (!descriptionEl) return;
+    descriptionEl.classList.remove('visible');
+}
+
+/**
+ * Highlight a specific connecting line
+ */
+function highlightLine(index) {
+    if (!linesEl) return;
+    
+    const lines = linesEl.querySelectorAll('.radial-line');
+    lines.forEach((line, i) => {
+        if (i === index) {
+            line.classList.add('active');
+        } else {
+            line.classList.remove('active');
+        }
+    });
 }
 
 /**
  * Reset pointer to center
  */
 function resetPointer() {
-    if (pointerEl) {
-        pointerEl.style.transform = 'translate(-50%, -50%)';
+    setPointerTarget(0, 0, false);
+    
+    // Clear line highlights
+    if (linesEl) {
+        const lines = linesEl.querySelectorAll('.radial-line');
+        lines.forEach(line => line.classList.remove('active'));
     }
 }
 
@@ -228,40 +416,59 @@ function setActiveItem(item) {
 }
 
 /**
- * Animate menu open with staggered effect
+ * Animate menu open with staggered elastic effect
  */
 function animateOpen() {
     menuEl.classList.add('open');
     
-    const items = document.querySelectorAll('.radial-item');
-    items.forEach((item, index) => {
-        // Reset and animate
+    const itemElements = document.querySelectorAll('.radial-item');
+    itemElements.forEach((item, index) => {
+        // Elastic stagger timing
         item.style.transitionDelay = `${index * CONFIG.staggerDelay}ms`;
     });
+    
+    // Start smooth pointer animation
+    startPointerAnimation();
+    
+    // Emit custom event
+    menuEl.dispatchEvent(new CustomEvent('radialmenu:opened'));
 }
 
 /**
  * Animate menu close with reverse stagger
  */
 function animateClose() {
-    const items = document.querySelectorAll('.radial-item');
-    const count = items.length;
+    const itemElements = document.querySelectorAll('.radial-item');
+    const count = itemElements.length;
     
-    items.forEach((item, index) => {
-        // Reverse stagger
-        item.style.transitionDelay = `${(count - 1 - index) * CONFIG.staggerDelay}ms`;
+    itemElements.forEach((item, index) => {
+        // Reverse stagger for close
+        item.style.transitionDelay = `${(count - 1 - index) * (CONFIG.staggerDelay * 0.7)}ms`;
     });
     
     menuEl.classList.remove('open');
     
-    // Reset pointer to center
+    // Reset pointer to center smoothly
     resetPointer();
+    
+    // Hide description
+    hideDescription();
+    
+    // Stop pointer animation after transition
+    setTimeout(() => {
+        stopPointerAnimation();
+        pointerCurrent = { x: 0, y: 0 };
+        pointerTarget = { x: 0, y: 0 };
+    }, CONFIG.animDuration);
     
     // Clear active item
     if (activeItem) {
         activeItem.classList.remove('active');
         activeItem = null;
     }
+    
+    // Emit custom event
+    menuEl.dispatchEvent(new CustomEvent('radialmenu:closed'));
 }
 
 /**

@@ -124,6 +124,9 @@
                         <!-- Pointer indicator -->
                         <div class="radial-pointer" id="radialPointer"></div>
                         
+                        <!-- Description tooltip -->
+                        <div class="radial-description" id="radialDescription"></div>
+                        
                         <ul class="radial-items">
                             <li class="radial-item" data-action="music" title="Play Music">
                                 <svg viewBox="0 0 24 24">
@@ -432,15 +435,6 @@
             </div>
             
             <div class="settings-section">
-                <h3>🤖 Model</h3>
-                
-                <div class="setting">
-                    <label for="modelSelect">LLM Model</label>
-                    <input type="text" id="modelSelect" value="llama3.2" placeholder="e.g., llama3.2, qwen3:30b">
-                </div>
-            </div>
-            
-            <div class="settings-section">
                 <h3>🔌 Backend</h3>
                 
                 <div class="setting">
@@ -470,6 +464,21 @@
                 <div class="setting hidden" id="apiKeySetting">
                     <label for="apiKeyInput">API Key</label>
                     <input type="password" id="apiKeyInput" value="" placeholder="sk-...">
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h3>🤖 Model</h3>
+                
+                <div class="setting">
+                    <label for="modelSelect">LLM Model</label>
+                    <div class="model-select-wrapper">
+                        <select id="modelSelect">
+                            <option value="">Loading models...</option>
+                        </select>
+                        <button type="button" id="refreshModelsBtn" class="icon-btn" title="Refresh models">🔄</button>
+                    </div>
+                    <input type="text" id="modelCustom" class="hidden" placeholder="Enter model name manually">
                 </div>
             </div>
             
