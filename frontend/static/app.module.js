@@ -124,6 +124,8 @@ class VoiceAgentApp {
             saveSettings: document.getElementById('saveSettings'),
             voiceSelect: document.getElementById('voiceSelect'),
             modelSelect: document.getElementById('modelSelect'),
+            modelCustom: document.getElementById('modelCustom'),
+            refreshModelsBtn: document.getElementById('refreshModelsBtn'),
             autoListen: document.getElementById('autoListen'),
             showTimestamps: document.getElementById('showTimestamps'),
             
@@ -150,6 +152,9 @@ class VoiceAgentApp {
             
             // Test audio button
             testAudioBtn: document.getElementById('testAudioBtn'),
+            
+            // Onboarding button
+            startOnboardingBtn: document.getElementById('startOnboardingBtn'),
             
             // Chat input elements
             textInput: document.getElementById('textInput'),
@@ -210,6 +215,21 @@ class VoiceAgentApp {
         // Test audio button
         this.elements.testAudioBtn?.addEventListener('click', () => this.testAudio());
         
+        // Onboarding button
+        this.elements.startOnboardingBtn?.addEventListener('click', () => {
+            this.closeModal();
+            
+            // Add message to conversation UI
+            this.addMessage('user', 'start onboarding', true);
+            
+            // Send to server
+            this.send({
+                type: 'text_message',
+                text: 'start onboarding',
+                attachments: []
+            });
+        });
+        
         // Flyout tabs
         document.querySelectorAll('.flyout-tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -249,6 +269,13 @@ class VoiceAgentApp {
         // Backend selection change
         this.elements.backendSelect?.addEventListener('change', (e) => {
             this.updateBackendVisibility(e.target.value);
+            this.fetchModels(e.target.value);
+        });
+        
+        // Refresh models button
+        this.elements.refreshModelsBtn?.addEventListener('click', () => {
+            const backend = this.elements.backendSelect?.value || 'ollama';
+            this.fetchModels(backend);
         });
         
         // Text input handling
@@ -377,6 +404,11 @@ class VoiceAgentApp {
         }
         this.updateBackendVisibility(settings.llmBackend || 'ollama');
         
+        // Fetch available models for the current backend
+        // Store the current model to restore after fetch
+        this._pendingModel = settings.model;
+        this.fetchModels(settings.llmBackend || 'ollama');
+        
         // Volume slider
         if (this.elements.volumeSlider) {
             this.elements.volumeSlider.value = settings.volume;
@@ -423,6 +455,114 @@ class VoiceAgentApp {
                 this.elements.openaiUrlSetting?.classList.remove('hidden');
                 this.elements.apiKeySetting?.classList.remove('hidden');
                 break;
+        }
+    }
+    
+    async fetchModels(backend = 'ollama') {
+        // Get the URL for the current backend
+        let url = '';
+        let apiKey = '';
+        
+        switch (backend) {
+            case 'ollama':
+                url = this.elements.ollamaUrl?.value || 'http://localhost:11434';
+                break;
+            case 'lmstudio':
+                url = this.elements.lmstudioUrl?.value || 'http://localhost:1234';
+                break;
+            case 'openai':
+                url = this.elements.openaiUrl?.value || 'https://api.openai.com';
+                apiKey = this.elements.apiKeyInput?.value || '';
+                break;
+        }
+        
+        // Show loading state
+        const refreshBtn = this.elements.refreshModelsBtn;
+        const modelSelect = this.elements.modelSelect;
+        const currentModel = this._pendingModel || modelSelect?.value || getAllSettings().model;
+        this._pendingModel = null;  // Clear pending model
+        
+        if (refreshBtn) {
+            refreshBtn.classList.add('loading');
+            refreshBtn.disabled = true;
+        }
+        
+        if (modelSelect) {
+            modelSelect.innerHTML = '<option value="">Loading...</option>';
+            modelSelect.disabled = true;
+        }
+        
+        try {
+            // Build URL with query params
+            const params = new URLSearchParams({ backend, url });
+            if (apiKey) {
+                params.append('api_key', apiKey);
+            }
+            
+            const response = await fetch(`/api/models?${params.toString()}`);
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            const models = data.models || [];
+            
+            if (modelSelect) {
+                modelSelect.innerHTML = '';
+                
+                if (models.length === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No models found';
+                    modelSelect.appendChild(option);
+                } else {
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.name;
+                        
+                        // Format display name
+                        let displayName = model.name;
+                        if (model.size) {
+                            const sizeGB = (model.size / (1024 * 1024 * 1024)).toFixed(1);
+                            displayName += ` (${sizeGB}GB)`;
+                        }
+                        option.textContent = displayName;
+                        modelSelect.appendChild(option);
+                    });
+                    
+                    // Try to restore the previous selection
+                    if (currentModel && models.some(m => m.name === currentModel)) {
+                        modelSelect.value = currentModel;
+                    } else if (models.length > 0) {
+                        // Default to first model
+                        modelSelect.value = models[0].name;
+                    }
+                }
+                
+                modelSelect.disabled = false;
+            }
+            
+            console.log(`Loaded ${models.length} models for ${backend}`);
+            
+        } catch (error) {
+            console.error('Failed to fetch models:', error);
+            
+            if (modelSelect) {
+                modelSelect.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = currentModel || 'llama3.2';
+                option.textContent = currentModel || 'llama3.2';
+                modelSelect.appendChild(option);
+                modelSelect.disabled = false;
+            }
+            
+            showError(`Could not load models: ${error.message}`);
+        } finally {
+            if (refreshBtn) {
+                refreshBtn.classList.remove('loading');
+                refreshBtn.disabled = false;
+            }
         }
     }
     
@@ -483,6 +623,7 @@ class VoiceAgentApp {
         
         try {
             this.ws = new WebSocket(this.wsUrl);
+            this.ws.binaryType = 'arraybuffer';  // Ensure binary data is sent/received as ArrayBuffer
             
             this.ws.onopen = () => {
                 this.isConnected = true;
@@ -679,6 +820,7 @@ class VoiceAgentApp {
     // ========================================
     
     handleOrbClick() {
+        console.log('[Felix] Orb clicked! isListening:', this.isListening);
         if (this.isListening) {
             this.stopListening();
         } else {
@@ -687,16 +829,19 @@ class VoiceAgentApp {
     }
     
     async startListening() {
+        console.log('[Felix] startListening called, isConnected:', this.isConnected);
         if (!this.isConnected) {
             showError('Not connected to server');
             return;
         }
         
         try {
+            console.log('[Felix] Starting audio recording...');
             await this.audioHandler.startRecording();
             this.isListening = true;
             
             this.elements.orb?.classList.add('active');
+            console.log('[Felix] Sending start_listening to server');
             this.send({ type: 'start_listening' });
             this.startVisualization();
         } catch (error) {
@@ -718,25 +863,24 @@ class VoiceAgentApp {
         const isPlaying = this.audioHandler.isPlaying;
         const isRecording = this.audioHandler.isRecording;
         
-        // Debug: log barge-in status periodically
-        if (isPlaying && Math.random() < 0.05) {
-            console.log('Barge-in check:', 
-                'playing=' + isPlaying, 
-                'recording=' + isRecording, 
-                'listening=' + this.isListening, 
-                'connected=' + this.isConnected,
-                'dataSize=' + pcmData.length
-            );
-        }
+        // Debug: log every audio send
+        console.log('[Felix] sendAudio called:', 
+            'dataSize=' + pcmData.length,
+            'isListening=' + this.isListening, 
+            'isConnected=' + this.isConnected,
+            'wsState=' + (this.ws ? this.ws.readyState : 'null')
+        );
         
         // Check connection
         if (!this.isConnected) {
+            console.log('[Felix] Not connected, skipping audio');
             return;
         }
         
         // During TTS playback, always send audio for barge-in detection
         // Even if not "listening", the server needs audio to detect speech
         if (!this.isListening && !isPlaying) {
+            console.log('[Felix] Not listening and not playing, skipping audio');
             return;
         }
         
@@ -745,6 +889,7 @@ class VoiceAgentApp {
         packet[0] = isTTSPlaying;
         packet.set(new Uint8Array(pcmData.buffer), 1);
         
+        console.log('[Felix] Sending audio packet, size=' + packet.length);
         this.ws.send(packet.buffer);
     }
     
@@ -851,6 +996,14 @@ class VoiceAgentApp {
         if (messageEl && isFinal) {
             messageEl.classList.remove('interim');
             messageEl.querySelector('p').textContent = text;
+            // Add action buttons for assistant and user messages
+            if (!messageEl.querySelector('.message-actions')) {
+                if (role === 'assistant') {
+                    this.addMessageActions(messageEl, text, 'assistant');
+                } else if (role === 'user') {
+                    this.addMessageActions(messageEl, text, 'user');
+                }
+            }
             // Add to history when finalized
             if (role !== 'system') {
                 this.addToHistory(role, text);
@@ -860,6 +1013,14 @@ class VoiceAgentApp {
             messageEl.className = `message ${role}${isFinal ? '' : ' interim'}`;
             messageEl.innerHTML = `<p>${escapeHtml(text)}</p>`;
             conversation.appendChild(messageEl);
+            // Add action buttons for assistant and user messages if final
+            if (isFinal) {
+                if (role === 'assistant') {
+                    this.addMessageActions(messageEl, text, 'assistant');
+                } else if (role === 'user') {
+                    this.addMessageActions(messageEl, text, 'user');
+                }
+            }
             // Add to history if final and not system
             if (isFinal && role !== 'system') {
                 this.addToHistory(role, text);
@@ -903,11 +1064,15 @@ class VoiceAgentApp {
         if (messageEl) {
             messageEl.classList.remove('streaming');
             messageEl.querySelector('p').textContent = cleanedText;
+            // Add action buttons
+            this.addMessageActions(messageEl, cleanedText, 'assistant');
         } else {
             messageEl = document.createElement('div');
             messageEl.className = 'message assistant';
             messageEl.innerHTML = `<p>${escapeHtml(cleanedText)}</p>`;
             conversation.appendChild(messageEl);
+            // Add action buttons
+            this.addMessageActions(messageEl, cleanedText, 'assistant');
         }
         
         // Add to history
@@ -916,6 +1081,307 @@ class VoiceAgentApp {
         }
         
         conversation.scrollTop = conversation.scrollHeight;
+    }
+    
+    addMessageActions(messageEl, text, role = 'assistant') {
+        // Don't add if already has actions
+        if (messageEl.querySelector('.message-actions')) return;
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions';
+        
+        if (role === 'assistant') {
+            // Assistant message actions: copy, speak, regenerate, save
+            actionsDiv.innerHTML = `
+                <button class="action-btn" data-action="copy" title="Copy to clipboard">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                    </svg>
+                </button>
+                <button class="action-btn" data-action="speak" title="Read aloud">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                    </svg>
+                </button>
+                <button class="action-btn" data-action="regenerate" title="Regenerate response">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                    </svg>
+                </button>
+                <button class="action-btn" data-action="save" title="Save to memory">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/>
+                    </svg>
+                </button>
+            `;
+        } else if (role === 'user') {
+            // User message actions: copy, edit
+            actionsDiv.innerHTML = `
+                <button class="action-btn" data-action="copy" title="Copy to clipboard">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                    </svg>
+                </button>
+                <button class="action-btn" data-action="edit" title="Edit and resubmit">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+                    </svg>
+                </button>
+            `;
+        }
+        
+        messageEl.appendChild(actionsDiv);
+        
+        // Add click handlers
+        actionsDiv.querySelectorAll('.action-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = btn.dataset.action;
+                this.handleMessageAction(action, text, messageEl, role);
+            });
+        });
+    }
+    
+    async handleMessageAction(action, text, messageEl, role = 'assistant') {
+        switch(action) {
+            case 'copy':
+                try {
+                    // Clean the text by removing markdown and extra whitespace
+                    const cleanText = text
+                        .replace(/\*\*/g, '')  // Remove bold markers
+                        .replace(/\*/g, '')    // Remove italic markers
+                        .replace(/`([^`]+)`/g, '$1')  // Remove inline code markers
+                        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // Remove links, keep text
+                        .trim();
+                    
+                    await navigator.clipboard.writeText(cleanText);
+                    showSuccess('Copied to clipboard!', { duration: 1500 });
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                    showError('Failed to copy to clipboard');
+                }
+                break;
+                
+            case 'speak':
+                try {
+                    // Use test audio to read the message
+                    this.send({ type: 'test_audio', text: text });
+                    showInfo('Reading message...', { duration: 1500 });
+                } catch (err) {
+                    console.error('Speak failed:', err);
+                    showError('Failed to read message');
+                }
+                break;
+                
+            case 'regenerate':
+                try {
+                    // Find the user message that prompted this response
+                    const messages = this.elements.conversation.querySelectorAll('.message');
+                    let userMessageText = null;
+                    
+                    // Find the user message before this assistant message
+                    for (let i = 0; i < messages.length; i++) {
+                        if (messages[i] === messageEl) {
+                            // Look backwards for the last user message
+                            for (let j = i - 1; j >= 0; j--) {
+                                if (messages[j].classList.contains('user')) {
+                                    userMessageText = messages[j].querySelector('p')?.textContent;
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    
+                    if (userMessageText) {
+                        // Remove the current assistant response
+                        messageEl.remove();
+                        
+                        // Resend the user message
+                        this.send({
+                            type: 'text_message',
+                            text: userMessageText,
+                            attachments: []
+                        });
+                        showInfo('Regenerating response...', { duration: 2000 });
+                    } else {
+                        showError('Could not find original message');
+                    }
+                } catch (err) {
+                    console.error('Regenerate failed:', err);
+                    showError('Failed to regenerate response');
+                }
+                break;
+                
+            case 'save':
+                try {
+                    // Save to memory using the remember tool
+                    this.send({
+                        type: 'text_message',
+                        text: `remember this important information: ${text}`,
+                        attachments: []
+                    });
+                    showSuccess('Saving to memory...', { duration: 2000 });
+                } catch (err) {
+                    console.error('Save failed:', err);
+                    showError('Failed to save to memory');
+                }
+                break;
+                
+            case 'edit':
+                try {
+                    // Make the message editable inline
+                    const messageContent = messageEl.querySelector('p');
+                    const actionsDiv = messageEl.querySelector('.message-actions');
+                    const originalText = messageContent.textContent;
+                    
+                    // Hide actions during edit
+                    actionsDiv.style.display = 'none';
+                    
+                    // Create editable textarea
+                    const textarea = document.createElement('textarea');
+                    textarea.className = 'message-edit-input';
+                    textarea.value = originalText;
+                    textarea.style.cssText = `
+                        width: 100%;
+                        min-height: 60px;
+                        padding: 0.5rem;
+                        border: 2px solid var(--accent-primary);
+                        border-radius: 8px;
+                        background: var(--bg-glass);
+                        color: var(--text-primary);
+                        font-family: inherit;
+                        font-size: inherit;
+                        resize: vertical;
+                        outline: none;
+                    `;
+                    
+                    // Create button container
+                    const btnContainer = document.createElement('div');
+                    btnContainer.style.cssText = `
+                        display: flex;
+                        gap: 0.5rem;
+                        margin-top: 0.5rem;
+                        justify-content: flex-end;
+                    `;
+                    
+                    // Create Save and Cancel buttons
+                    const saveBtn = document.createElement('button');
+                    saveBtn.textContent = 'Save & Resubmit';
+                    saveBtn.className = 'input-btn send-btn';
+                    saveBtn.style.cssText = `
+                        padding: 0.5rem 1rem;
+                        border-radius: 8px;
+                        width: auto;
+                        height: auto;
+                    `;
+                    
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.textContent = 'Cancel';
+                    cancelBtn.className = 'input-btn';
+                    cancelBtn.style.cssText = `
+                        padding: 0.5rem 1rem;
+                        border-radius: 8px;
+                        width: auto;
+                        height: auto;
+                    `;
+                    
+                    btnContainer.appendChild(cancelBtn);
+                    btnContainer.appendChild(saveBtn);
+                    
+                    // Replace message content with editor
+                    messageContent.style.display = 'none';
+                    messageEl.insertBefore(textarea, actionsDiv);
+                    messageEl.insertBefore(btnContainer, actionsDiv);
+                    
+                    // Focus textarea
+                    textarea.focus();
+                    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                    
+                    // Cancel handler
+                    cancelBtn.onclick = () => {
+                        textarea.remove();
+                        btnContainer.remove();
+                        messageContent.style.display = '';
+                        actionsDiv.style.display = '';
+                    };
+                    
+                    // Save handler
+                    saveBtn.onclick = () => {
+                        const newText = textarea.value.trim();
+                        if (!newText) {
+                            showError('Message cannot be empty');
+                            return;
+                        }
+                        
+                        // Find and remove all messages after this one (user message + assistant responses)
+                        const messages = this.elements.conversation.querySelectorAll('.message');
+                        let foundCurrent = false;
+                        const toRemove = [];
+                        
+                        for (let i = 0; i < messages.length; i++) {
+                            if (messages[i] === messageEl) {
+                                foundCurrent = true;
+                                continue;
+                            }
+                            if (foundCurrent) {
+                                toRemove.push(messages[i]);
+                            }
+                        }
+                        
+                        // Remove subsequent messages
+                        toRemove.forEach(msg => msg.remove());
+                        
+                        // Update the current message with new text
+                        messageContent.textContent = newText;
+                        textarea.remove();
+                        btnContainer.remove();
+                        messageContent.style.display = '';
+                        actionsDiv.style.display = '';
+                        
+                        // Resend the edited message
+                        this.send({
+                            type: 'text_message',
+                            text: newText,
+                            attachments: []
+                        });
+                        
+                        showInfo('Message updated and resubmitted', { duration: 2000 });
+                    };
+                    
+                    // Allow Enter to save (Shift+Enter for new line)
+                    textarea.addEventListener('keydown', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            saveBtn.click();
+                        }
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            cancelBtn.click();
+                        }
+                    });
+                    
+                } catch (err) {
+                    console.error('Edit failed:', err);
+                    showError('Failed to edit message');
+                }
+                break;
+                
+            case 'resubmit':
+                try {
+                    // Resend the user message as-is
+                    this.send({
+                        type: 'text_message',
+                        text: text,
+                        attachments: []
+                    });
+                    showInfo('Resubmitting message...', { duration: 1500 });
+                } catch (err) {
+                    console.error('Resubmit failed:', err);
+                    showError('Failed to resubmit message');
+                }
+                break;
+        }
     }
     
     clearConversation() {
@@ -1347,5 +1813,7 @@ class VoiceAgentApp {
 
 // Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('[Felix] DOM loaded, initializing app...');
     window.app = new VoiceAgentApp();
+    console.log('[Felix] App instance created:', window.app);
 });

@@ -126,6 +126,11 @@ echo -e "${GREEN}✓ Model $MODEL available${NC}"
 HOST=${HOST:-0.0.0.0}
 PORT=${PORT:-8000}
 
+# Force torchaudio to use CPU to avoid cuDNN version mismatches
+# Silero VAD doesn't need GPU acceleration
+export TORCHAUDIO_USE_BACKEND_DISPATCHER=1
+export PYTORCH_ENABLE_MPS_FALLBACK=1
+
 echo ""
 echo -e "${GREEN}Starting Voice Agent server...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"

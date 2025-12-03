@@ -12,6 +12,8 @@ from . import knowledge_tools
 from . import help_tools
 from . import memory_tools
 from . import music_tools
+from . import onboarding_tools
+from . import image_tools
 
 __all__ = [
     "datetime_tools",
@@ -22,4 +24,6 @@ __all__ = [
     "help_tools",
     "memory_tools",
     "music_tools",
+    "onboarding_tools",
+    "image_tools",
 ]

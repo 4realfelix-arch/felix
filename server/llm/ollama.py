@@ -733,6 +733,94 @@ class LLMClient:
             logger.error("health_check_failed", error=str(e))
             return False
 
+    async def list_models(self) -> list[dict]:
+        """
+        List available models from the backend.
+        
+        Returns:
+            List of model info dicts with 'name' and optional 'size', 'modified' keys
+        """
+        try:
+            client = await self._get_client()
+            
+            if self.backend == "ollama":
+                # Ollama: GET /api/tags
+                response = await client.get("/api/tags")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+                    for model in data.get("models", []):
+                        models.append({
+                            "name": model.get("name", ""),
+                            "size": model.get("size", 0),
+                            "modified": model.get("modified_at", ""),
+                            "family": model.get("details", {}).get("family", ""),
+                        })
+                    return models
+            
+            elif self.backend == "lmstudio":
+                # LM Studio: GET /v1/models (OpenAI-compatible)
+                response = await client.get("/v1/models")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+                    for model in data.get("data", []):
+                        models.append({
+                            "name": model.get("id", ""),
+                            "owned_by": model.get("owned_by", ""),
+                        })
+                    return models
+            
+            elif self.backend == "openai":
+                # OpenAI: GET /v1/models
+                response = await client.get("/v1/models")
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+                    for model in data.get("data", []):
+                        # Filter to commonly used models
+                        model_id = model.get("id", "")
+                        if any(prefix in model_id for prefix in ["gpt-", "o1", "chatgpt"]):
+                            models.append({
+                                "name": model_id,
+                                "owned_by": model.get("owned_by", ""),
+                            })
+                    return models
+            
+            return []
+        except Exception as e:
+            logger.error("list_models_failed", error=str(e), backend=self.backend)
+            return []
+
+
+async def list_models_for_backend(
+    backend: str,
+    url: str,
+    api_key: str = None
+) -> list[dict]:
+    """
+    List models for a specific backend configuration.
+    Creates a temporary client to fetch models.
+    
+    Args:
+        backend: Backend type (ollama, lmstudio, openai)
+        url: Backend URL
+        api_key: API key (for OpenAI-compatible backends)
+    
+    Returns:
+        List of model info dicts
+    """
+    temp_client = LLMClient(
+        backend=backend,
+        base_url=url,
+        api_key=api_key
+    )
+    try:
+        models = await temp_client.list_models()
+        return models
+    finally:
+        await temp_client.close()
+
 
 # Backward compatibility alias
 OllamaClient = LLMClient

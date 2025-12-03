@@ -16,14 +16,13 @@ import structlog
 
 from .config import settings
 from .session import Session, SessionState
-from .audio.buffer import AudioBuffer
-from .audio.vad import SileroVAD
-from .stt.whisper_cpp import get_stt  # NEW: whisper.cpp with ROCm
-from .llm.ollama import OllamaClient, get_llm_client
-from .llm.conversation import ConversationHistory
-from .tts.piper_tts import get_tts, list_voices  # NEW: Piper local TTS
+from .audio.vad import create_vad, SileroVAD
+from .stt.whisper import get_stt  # faster-whisper with CUDA
+from .llm.ollama import get_llm_client, list_models_for_backend
+from .tts.piper_tts import get_tts, list_voices  # Piper local TTS
 from .tools import tool_registry, tool_executor
-from .tracing import init_tracing, get_tracer, start_pipeline_span, start_stt_span, start_llm_span, start_tool_span, start_tts_span
+from .tracing import init_tracing, get_tracer, start_stt_span, start_llm_span, start_tool_span, start_tts_span
+from .comfy_service import initialize_comfy_service, shutdown_comfy_service, get_comfy_service
 
 
 # Configure structured logging
@@ -49,14 +48,14 @@ async def lifespan(app: FastAPI):
     """Application lifecycle management."""
     logger.info("Starting Voice Agent server...")
     
-    # Initialize STT (whisper.cpp with ROCm on MI50)
-    logger.info("Loading Whisper model on MI50 GPU...")
-    stt = await get_stt()
-    logger.info("Whisper ready", model="large-v3-turbo")
+    # Initialize STT (faster-whisper with CUDA)
+    logger.info("Loading Whisper model on CUDA GPU...")
+    await get_stt()
+    logger.info("Whisper ready", model=settings.whisper_model)
     
     # Initialize TTS (Piper)
     logger.info("Initializing Piper TTS...")
-    tts = get_tts()
+    get_tts()
     voices = list_voices()
     logger.info("Piper ready", voices=[v["id"] for v in voices])
     
@@ -68,9 +67,22 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing tracing...")
     init_tracing(service_name="voice-agent")
     
+    # Initialize ComfyUI service
+    logger.info("Initializing ComfyUI service...")
+    comfy_service = await initialize_comfy_service(auto_start=False)  # Don't auto-start, start on-demand
+    if comfy_service:
+        logger.info("ComfyUI service initialized", url=comfy_service.base_url)
+    else:
+        logger.warning("ComfyUI service not available (image generation tools will be disabled)")
+    
     yield
     
     logger.info("Shutting down Voice Agent server...")
+    
+    # Shutdown ComfyUI service
+    if comfy_service:
+        logger.info("Shutting down ComfyUI service...")
+        await shutdown_comfy_service()
 
 
 # Create FastAPI app
@@ -112,12 +124,43 @@ async def service_worker():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
+    stt_backend = "faster-whisper"
+    if settings.whisper_device:
+        device_label = settings.whisper_device.upper()
+        if settings.whisper_device == "cuda":
+            device_label = f"CUDA (GPU {settings.whisper_gpu_device})"
+        stt_backend = f"{stt_backend} ({device_label})"
+
+    llm_backend = settings.llm_backend
+    if llm_backend == "ollama" and settings.ollama_model:
+        llm_backend = f"ollama ({settings.ollama_model})"
+    elif llm_backend == "lmstudio":
+        llm_backend = "lmstudio"
+    elif llm_backend == "openai":
+        llm_backend = "openai-compatible"
+
+    tts_backend = settings.tts_engine
+    if tts_backend == "piper" and settings.tts_voice:
+        tts_backend = f"piper ({settings.tts_voice})"
+    elif tts_backend == "clone":
+        tts_backend = "voice-clone"
+
+    # Check ComfyUI status
+    comfy_service = get_comfy_service()
+    comfy_status = "not_available"
+    if comfy_service:
+        if comfy_service.is_running:
+            comfy_status = "running"
+        else:
+            comfy_status = "stopped"
+
     return {
         "status": "ok",
-        "stt": "whisper.cpp (MI50 GPU)",
-        "tts": "piper (local)",
-        "llm": "ollama (MI50 GPU)",
+        "stt": stt_backend,
+        "tts": tts_backend,
+        "llm": llm_backend,
         "tools_registered": len(tool_registry.list_tools()),
+        "comfyui": comfy_status,
     }
 
 
@@ -125,6 +168,46 @@ async def health():
 async def get_voices():
     """Get available TTS voices."""
     return {"voices": list_voices()}
+
+
+@app.get("/api/models")
+async def get_models(
+    backend: str = "ollama",
+    url: str = None,
+    api_key: str = None
+):
+    """
+    Get available LLM models for a backend.
+    
+    Args:
+        backend: Backend type (ollama, lmstudio, openai)
+        url: Backend URL (uses defaults if not provided)
+        api_key: API key (for OpenAI-compatible backends)
+    """
+    # Default URLs for each backend
+    default_urls = {
+        "ollama": "http://localhost:11434",
+        "lmstudio": "http://localhost:1234",
+        "openai": "https://api.openai.com",
+    }
+    
+    # Validate backend
+    if backend not in default_urls:
+        return {"models": [], "error": f"Invalid backend: {backend}"}
+    
+    # Use provided URL or default
+    backend_url = url or default_urls[backend]
+    
+    try:
+        models = await list_models_for_backend(
+            backend=backend,
+            url=backend_url,
+            api_key=api_key
+        )
+        return {"models": models, "backend": backend}
+    except Exception as e:
+        logger.error("Failed to list models", backend=backend, error=str(e))
+        return {"models": [], "error": str(e)}
 
 
 class ConnectionManager:
@@ -174,7 +257,14 @@ def get_vad() -> SileroVAD:
     """Get or create the global VAD instance."""
     global _global_vad
     if _global_vad is None:
-        _global_vad = SileroVAD()
+        _global_vad = create_vad(
+            vad_type="silero",
+            threshold=settings.barge_in_threshold,
+            sample_rate=settings.audio_sample_rate,
+            min_speech_ms=settings.barge_in_min_speech_ms,
+            device=settings.whisper_device,
+            use_onnx=settings.whisper_device == "cpu",
+        )
     return _global_vad
 
 
@@ -188,25 +278,26 @@ async def process_audio_pipeline(
     voice_speed: float = 1.0,
 ):
     """Process audio through the full pipeline."""
+    print(f"[DEBUG] process_audio_pipeline: state={session.state.name}, tts_playing={tts_playing}, audio_len={len(audio_data)}", flush=True)
     try:
         # Get VAD instance
         vad = get_vad()
         
-        # BARGE-IN: Check for interrupts when client reports TTS is playing
+    # BARGE-IN: Check for interrupts when client reports TTS is playing
         if tts_playing:
             logger.debug("barge_in_audio_received", bytes=len(audio_data), state=session.state.name)
             
             # Run VAD to detect if user is speaking
-            prob, is_speech, _ = await asyncio.to_thread(
+            # SileroVAD returns (speech_probability, is_speaking, speech_ended)
+            is_speech_frame, is_speaking, _ = await asyncio.to_thread(
                 vad.process_chunk, audio_data
             )
             
-            logger.debug("barge_in_vad_result", prob=round(prob, 3), is_speech=is_speech)
+            logger.debug("barge_in_vad_result", is_speech_frame=is_speech_frame, is_speaking=is_speaking)
             
             # If VAD detects speech while TTS is playing = INTERRUPT
-            # Silero VAD distinguishes speech from noise, so this is reliable
-            if is_speech and prob > 0.5:
-                logger.info("BARGE-IN DETECTED!", client_id=client_id, prob=round(prob, 2))
+            if is_speaking:
+                logger.info("BARGE-IN DETECTED!", client_id=client_id)
                 
                 # Trigger interrupt
                 session.interrupt()
@@ -238,34 +329,46 @@ async def process_audio_pipeline(
         # Add audio to buffer
         session.audio_buffer.extend(audio_data)
         
-        # Process through VAD to detect end of speech
-        prob, is_speech, speech_ended = await asyncio.to_thread(
+    # Process through VAD to detect end of speech
+    # SileroVAD returns (speech_probability, is_speaking, speech_ended)
+        is_speech, is_speaking, speech_ended = await asyncio.to_thread(
             vad.process_chunk, audio_data
         )
+        
+        print(f"[DEBUG] VAD: is_speech={is_speech}, is_speaking={is_speaking}, speech_ended={speech_ended}, buffer={len(session.audio_buffer)}", flush=True)
         
         # Only process when speech has ended AND we have enough audio
         if not speech_ended:
             return
         
+        print(f"[DEBUG] Speech ended. Buffer size: {len(session.audio_buffer)}", flush=True)
+
         # Need minimum audio
         if len(session.audio_buffer) < 16000 * 0.5:  # 0.5 second minimum
             logger.debug("not_enough_audio", bytes=len(session.audio_buffer))
+            print(f"[DEBUG] Not enough audio: {len(session.audio_buffer)}", flush=True)
             return
         
         # Try to acquire lock - if already processing, skip
         if session._processing_lock.locked():
             logger.debug("pipeline_already_running", client_id=client_id)
+            print("[DEBUG] Pipeline already running", flush=True)
             return
         
+        print("[DEBUG] Acquiring lock...", flush=True)
         async with session._processing_lock:
+            print(f"[DEBUG] Lock acquired. State: {session.state}", flush=True)
             # Double-check state after acquiring lock
             if session.state != SessionState.LISTENING:
+                print(f"[DEBUG] State mismatch: {session.state}", flush=True)
                 return
             
             if len(session.audio_buffer) < 16000:  # 0.5 sec at 16kHz, 16-bit
+                print(f"[DEBUG] Buffer too small inside lock: {len(session.audio_buffer)}", flush=True)
                 return
             
             logger.info("processing_audio", buffer_bytes=len(session.audio_buffer))
+            print(f"[DEBUG] Processing audio! Bytes: {len(session.audio_buffer)}", flush=True)
             
             # Get audio and clear buffer
             audio_bytes = bytes(session.audio_buffer)
@@ -670,12 +773,15 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             # Receive message
             message = await websocket.receive()
+            print(f"[DEBUG] Received message keys: {message.keys()}", flush=True)
             session = manager.get_session(client_id)
             
             if not session:
+                print(f"[DEBUG] No session for {client_id}", flush=True)
                 continue
             
             if "bytes" in message:
+                print(f"[DEBUG] Got bytes: {len(message['bytes'])}", flush=True)
                 # Binary audio data with TTS flag
                 # Format: [1 byte flag][audio data]
                 raw_bytes = message["bytes"]
@@ -887,7 +993,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
 def main():
     """Run the server."""
-    import uvicorn
+    try:
+        import importlib
+        uvicorn = importlib.import_module("uvicorn")
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "uvicorn must be installed to run the Voice Agent server"
+        ) from exc
     
     uvicorn.run(
         "server.main:app",

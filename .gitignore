@@ -25,6 +25,21 @@ LM-Studio*.AppImage
 *.onnx
 *.so.1.*
 *.ort
+*.safetensors
+*.ckpt
+*.pth
+*.bin
+*.mp3
+*.mp4
+*.wav
+*.deb
+
+# ComfyUI models and outputs
+comfy/models/
+comfy/output/
+comfy/input/
+comfy/temp/
+comfy/user/
 
 # OS
 .DS_Store

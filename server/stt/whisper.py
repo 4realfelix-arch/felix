@@ -118,11 +118,8 @@ class WhisperSTT:
                 condition_on_previous_text=True,
                 initial_prompt=None,
                 word_timestamps=False,
+                # Enable whisper's internal VAD to help trim residual silence
                 vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=400,
-                ),
             )
         )
         

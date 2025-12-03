@@ -11,6 +11,8 @@ webrtcvad>=2.0.10
 
 # VAD - Silero
 torch>=2.0.0
+# NOTE: torchaudio should be installed separately with CPU-only version to avoid cuDNN issues:
+#   pip install torchaudio --index-url https://download.pytorch.org/whl/cpu
 onnxruntime>=1.16.0
 
 # STT - faster-whisper

@@ -4,7 +4,7 @@ Using Silero VAD for accurate speech detection.
 """
 import torch
 import numpy as np
-from typing import Optional, Tuple
+from typing import Tuple
 import structlog
 
 logger = structlog.get_logger()
@@ -22,6 +22,8 @@ class SileroVAD:
         sample_rate: int = 16000,
         min_speech_ms: int = 150,
         min_silence_ms: int = 300,
+        device: str = "cuda",
+        use_onnx: bool = False,
     ):
         """
         Initialize Silero VAD.
@@ -34,16 +36,22 @@ class SileroVAD:
         """
         self.threshold = threshold
         self.sample_rate = sample_rate
+        self.device = torch.device(
+            device if device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.use_onnx = use_onnx
         self.min_speech_samples = int(sample_rate * min_speech_ms / 1000)
         self.min_silence_samples = int(sample_rate * min_silence_ms / 1000)
         
-        # Load Silero VAD model
+        # Load Silero VAD model - default to TorchScript for CUDA acceleration
         self.model, self.utils = torch.hub.load(
             repo_or_dir='snakers4/silero-vad',
             model='silero_vad',
             force_reload=False,
-            onnx=True  # Use ONNX for faster CPU inference
+            onnx=use_onnx
         )
+        if not use_onnx:
+            self.model.to(self.device)
         
         # Expected chunk size: 512 samples for 16kHz, 256 for 8kHz
         self._chunk_size = 512 if sample_rate == 16000 else 256
@@ -85,11 +93,14 @@ class SileroVAD:
         
         # Process all complete chunks
         speech_prob = 0.0
+        is_speech = False
         while len(self._buffer) >= self._chunk_size:
             chunk = self._buffer[:self._chunk_size]
             self._buffer = self._buffer[self._chunk_size:]
             
             audio_tensor = torch.from_numpy(chunk)
+            if not self.use_onnx:
+                audio_tensor = audio_tensor.to(self.device)
             speech_prob = self.model(audio_tensor, self.sample_rate).item()
             
             is_speech = speech_prob >= self.threshold
@@ -132,7 +143,7 @@ class WebRTCVAD:
     
     def __init__(
         self,
-        aggressiveness: int = 2,
+        aggressiveness: int = 1,
         sample_rate: int = 16000,
         frame_ms: int = 30,
     ):
@@ -144,7 +155,13 @@ class WebRTCVAD:
             sample_rate: Must be 8000, 16000, 32000, or 48000
             frame_ms: Frame duration, must be 10, 20, or 30
         """
-        import webrtcvad
+        try:
+            import importlib
+            webrtcvad = importlib.import_module("webrtcvad")
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "webrtcvad package is required for WebRTC VAD but is not installed"
+            ) from exc
         
         self.vad = webrtcvad.Vad(aggressiveness)
         self.sample_rate = sample_rate
@@ -154,6 +171,7 @@ class WebRTCVAD:
         self._is_speaking = False
         self._speech_frames = 0
         self._silence_frames = 0
+        self._buffer = bytearray()
         
         # Thresholds (in frames)
         self.speech_threshold = 3   # Frames of speech to trigger
@@ -164,40 +182,44 @@ class WebRTCVAD:
         self._is_speaking = False
         self._speech_frames = 0
         self._silence_frames = 0
+        self._buffer = bytearray()
     
     def process_chunk(self, audio_chunk: bytes) -> Tuple[bool, bool, bool]:
         """
-        Process audio chunk.
+        Process audio chunk by breaking it into frames.
         
         Returns:
             Tuple of (is_speech_frame, is_speaking, speech_ended)
         """
-        # WebRTC VAD needs exact frame sizes
-        if len(audio_chunk) != self.frame_bytes:
-            # Pad or truncate
-            if len(audio_chunk) < self.frame_bytes:
-                audio_chunk = audio_chunk + b'\x00' * (self.frame_bytes - len(audio_chunk))
-            else:
-                audio_chunk = audio_chunk[:self.frame_bytes]
-        
-        is_speech = self.vad.is_speech(audio_chunk, self.sample_rate)
         speech_ended = False
+        is_speech_in_chunk = False
         
-        if is_speech:
-            self._speech_frames += 1
-            self._silence_frames = 0
-            
-            if self._speech_frames >= self.speech_threshold:
-                self._is_speaking = True
-        else:
-            self._silence_frames += 1
-            
-            if self._is_speaking and self._silence_frames >= self.silence_threshold:
-                self._is_speaking = False
-                speech_ended = True
-                self._speech_frames = 0
+        # Add to buffer
+        self._buffer.extend(audio_chunk)
         
-        return is_speech, self._is_speaking, speech_ended
+        # Process all complete frames in the buffer
+        while len(self._buffer) >= self.frame_bytes:
+            frame = bytes(self._buffer[:self.frame_bytes])
+            del self._buffer[:self.frame_bytes]
+            
+            is_speech = self.vad.is_speech(frame, self.sample_rate)
+            
+            if is_speech:
+                is_speech_in_chunk = True
+                self._speech_frames += 1
+                self._silence_frames = 0
+                
+                if self._speech_frames >= self.speech_threshold:
+                    self._is_speaking = True
+            else:
+                self._silence_frames += 1
+                
+                if self._is_speaking and self._silence_frames >= self.silence_threshold:
+                    self._is_speaking = False
+                    speech_ended = True
+                    self._speech_frames = 0
+        
+        return is_speech_in_chunk, self._is_speaking, speech_ended
     
     @property
     def is_speaking(self) -> bool:

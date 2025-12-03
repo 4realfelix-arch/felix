@@ -12,9 +12,11 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
-    # STT Settings (whisper.cpp with ROCm)
-    whisper_model: str = Field(default="ggml-large-v3-turbo.bin", description="Whisper model filename")
-    whisper_gpu_device: int = Field(default=1, description="HIP device: 0=RX6600, 1=MI50#1, 2=MI50#2")
+    # STT Settings (faster-whisper with CUDA or whisper.cpp with ROCm)
+    whisper_model: str = Field(default="large-v3-turbo", description="Whisper model name/size")
+    whisper_device: str = Field(default="cuda", description="Device: cuda, cpu, or auto")
+    whisper_compute_type: str = Field(default="float16", description="Compute type: float16, int8, int8_float16")
+    whisper_gpu_device: int = Field(default=0, description="GPU device index for CUDA")
     
     # LLM Settings
     llm_backend: Literal["ollama", "lmstudio", "openai"] = Field(default="ollama", description="LLM backend type")
