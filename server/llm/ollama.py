@@ -105,11 +105,22 @@ def extract_json_tool_calls(text: str) -> list[dict]:
 
 def _clean_tool_artifacts(text: str) -> str:
     """
-    Remove tool call JSON artifacts from text.
+    Remove tool call JSON artifacts and thinking tags from text.
     llama3.2 sometimes outputs partial JSON when making tool calls.
+    Some models (Qwen3, DeepSeek) wrap reasoning in <think>...</think> tags.
     """
     if not text:
         return text
+    
+    # Remove thinking/reasoning tags first (Qwen3, DeepSeek style)
+    # These can be <think>...</think> or <|think|>...</|think|> or similar
+    text = re.sub(r'<\|?think\|?>.*?</?\|?think\|?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<\|?thinking\|?>.*?</?\|?thinking\|?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<\|?reason\|?>.*?</?\|?reason\|?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<\|?reasoning\|?>.*?</?\|?reasoning\|?>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Also handle unclosed tags (model started thinking but we cut it off)
+    text = re.sub(r'<\|?think\|?>.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<\|?thinking\|?>.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
     
     # Remove various JSON-like patterns
     patterns = [
