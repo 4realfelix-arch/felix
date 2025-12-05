@@ -61,14 +61,14 @@ async def _get_client() -> MPDClient:
         raise ConnectionError(f"Could not connect to MPD at {MPD_HOST}:{MPD_PORT}. Is MPD running?")
     except asyncio.TimeoutError:
         logger.error("mpd_timeout")
-        raise ConnectionError(f"MPD connection timeout")
+        raise ConnectionError("MPD connection timeout")
 
 
 async def _disconnect_client(client: MPDClient):
     """Safely disconnect MPD client."""
     try:
         client.disconnect()
-    except:
+    except Exception:
         pass
 
 
@@ -186,7 +186,8 @@ async def music_play(query: Optional[str] = None) -> str:
     Start or resume music playback.
     
     Args:
-        query: Optional search query to find and play specific music (artist, song, album)
+        query: Optional search query to find and play specific music (artist, song, album).
+            When omitted, resumes playback or, if the queue is empty, enqueues the full library.
     
     Returns:
         What's now playing or error message
@@ -218,18 +219,39 @@ async def music_play(query: Optional[str] = None) -> str:
                 
                 return f"Playing {count} tracks matching '{query}'. Now playing: {_music_state.get('current_track', 'Unknown')}"
             else:
-                # Just play/resume
-                await client.play()
-                await _update_music_state()
+                # Resume playback or seed the queue with the full library when empty
+                status = await client.status()
+                queue_length = int(status.get('playlistlength', '0') or 0)
                 
-                if _music_state["current_track"]:
-                    artist = _music_state.get("artist", "")
-                    track = _music_state.get("current_track", "Unknown")
-                    if artist:
-                        return f"Now playing: {artist} - {track}"
-                    return f"Now playing: {track}"
+                if queue_length == 0:
+                    library = await client.listallinfo()
+                    tracks = [song for song in library if isinstance(song, dict) and song.get('file')]
+                    
+                    if not tracks:
+                        return "Music library is empty. Add files to ~/Music and run 'update music library'."
+                    
+                    await client.clear()
+                    queued = 0
+                    for song in tracks:
+                        await client.add(song['file'])
+                        queued += 1
+                    
+                    await client.play(0)
+                    await _update_music_state()
+                    current = _music_state.get("current_track", "Unknown")
+                    return f"Queued {queued} songs from your library. Now playing: {current}."
                 else:
-                    return "No music in queue. Try: 'play some jazz' or add music to ~/Music folder."
+                    await client.play()
+                    await _update_music_state()
+                    
+                    if _music_state["current_track"]:
+                        artist = _music_state.get("artist", "")
+                        track = _music_state.get("current_track", "Unknown")
+                        if artist:
+                            return f"Now playing: {artist} - {track}"
+                        return f"Now playing: {track}"
+                    else:
+                        return "Queue appears to be empty. Try adding music to ~/Music and say 'play all songs'."
         finally:
             await _disconnect_client(client)
             
@@ -476,12 +498,13 @@ async def music_repeat(enable: Optional[bool] = None) -> str:
 @tool_registry.register(
     description="Search the music library for songs, artists, or albums."
 )
-async def music_search(query: str, limit: int = 10) -> str:
+async def music_search(query: Optional[str] = None, limit: int = 10) -> str:
     """
     Search the music library.
     
     Args:
-        query: Search term (matches artist, title, album, etc.)
+        query: Optional search term (matches artist, title, album, etc.).
+            When omitted, returns a preview of the full library.
         limit: Maximum results to return (default 10)
     
     Returns:
@@ -490,21 +513,42 @@ async def music_search(query: str, limit: int = 10) -> str:
     try:
         client = await _get_client()
         try:
-            search_results = await client.search('any', query)
-            
-            if not search_results:
-                return f"No results found for '{query}'. Make sure you have music files in ~/Music."
-            
-            results = search_results[:limit]
-            
-            result_lines = [f"Found {len(search_results)} tracks matching '{query}' (showing {len(results)}):"]
-            for i, song in enumerate(results, 1):
-                artist = song.get('artist', 'Unknown Artist')
-                title = song.get('title', song.get('file', 'Unknown').split('/')[-1])
-                result_lines.append(f"{i}. {artist} - {title}")
-            
-            result_lines.append("\nSay 'play [search term]' to play these results.")
-            return "\n".join(result_lines)
+            limit = max(1, min(limit, 50))
+            query = query.strip() if query else None
+
+            if query:
+                search_results = await client.search('any', query)
+                
+                if not search_results:
+                    return f"No results found for '{query}'. Make sure you have music files in ~/Music."
+                
+                results = search_results[:limit]
+                
+                result_lines = [f"Found {len(search_results)} tracks matching '{query}' (showing {len(results)}):"]
+                for i, song in enumerate(results, 1):
+                    artist = song.get('artist', 'Unknown Artist')
+                    title = song.get('title', song.get('file', 'Unknown').split('/')[-1])
+                    result_lines.append(f"{i}. {artist} - {title}")
+                
+                result_lines.append("\nSay 'play [search term]' to play these results.")
+                return "\n".join(result_lines)
+            else:
+                # Provide a library preview when no query is supplied
+                library = await client.listallinfo()
+                tracks = [song for song in library if isinstance(song, dict) and 'file' in song]
+                
+                if not tracks:
+                    return "Music library is empty. Add files to ~/Music and run 'update music library'."
+                
+                preview = tracks[:limit]
+                result_lines = [f"Library preview (showing {len(preview)} of {len(tracks)} tracks):"]
+                for i, song in enumerate(preview, 1):
+                    artist = song.get('artist', 'Unknown Artist')
+                    title = song.get('title', song.get('file', 'Unknown').split('/')[-1])
+                    result_lines.append(f"{i}. {artist} - {title}")
+                
+                result_lines.append("\nSay 'search for [term]' or 'play [term]' to filter by artist, song, or album.")
+                return "\n".join(result_lines)
         finally:
             await _disconnect_client(client)
     except ConnectionError as e:
@@ -693,7 +737,7 @@ async def music_playlist_save(name: str) -> str:
             # Remove old playlist with same name if exists
             try:
                 await client.rm(name)
-            except:
+            except Exception:
                 pass  # Playlist doesn't exist, that's fine
             
             await client.save(name)

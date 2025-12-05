@@ -133,6 +133,9 @@ def _clean_tool_artifacts(text: str) -> str:
         r'^\s*[\[\{].*[\]\}]\s*$',
         # Isolated JSON syntax chars with optional whitespace
         r'^\s*["\[\]\{\},:\s]+\s*$',
+        # Tool result markers or similar tags
+        r'\[TOOL_RESULT\].*?\[END_TOOL_RESULT\]',
+        r'\[TOOL_CALL\].*?\[END_TOOL_CALL\]',
     ]
     
     result = text

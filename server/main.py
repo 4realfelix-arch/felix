@@ -8,6 +8,7 @@ import base64
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
+import threading
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -252,6 +253,19 @@ manager = ConnectionManager()
 
 # Global VAD instance (singleton to avoid repeated loading)
 _global_vad: Optional[SileroVAD] = None
+_vad_thread_lock = threading.Lock()
+
+
+def _run_vad_process_chunk(vad: SileroVAD, audio_chunk: bytes):
+    """Thread-safe wrapper around vad.process_chunk."""
+    with _vad_thread_lock:
+        return vad.process_chunk(audio_chunk)
+
+
+def _run_vad_reset(vad: SileroVAD):
+    """Thread-safe wrapper around vad.reset."""
+    with _vad_thread_lock:
+        vad.reset()
 
 def get_vad() -> SileroVAD:
     """Get or create the global VAD instance."""
@@ -305,7 +319,7 @@ async def process_audio_pipeline(
             # Run VAD to detect if user is speaking
             # SileroVAD returns (speech_probability, is_speaking, speech_ended)
             is_speech_frame, is_speaking, _ = await asyncio.to_thread(
-                vad.process_chunk, audio_data
+                _run_vad_process_chunk, vad, audio_data
             )
             
             logger.debug("barge_in_vad_result", is_speech_frame=is_speech_frame, is_speaking=is_speaking)
@@ -323,7 +337,7 @@ async def process_audio_pipeline(
                 
                 # Clear buffer and reset VAD for fresh start
                 session.audio_buffer.clear()
-                vad.reset()
+                await asyncio.to_thread(_run_vad_reset, vad)
                 
                 # Go back to listening immediately
                 session.set_state(SessionState.LISTENING)
@@ -347,7 +361,7 @@ async def process_audio_pipeline(
     # Process through VAD to detect end of speech
     # SileroVAD returns (speech_probability, is_speaking, speech_ended)
         is_speech, is_speaking, speech_ended = await asyncio.to_thread(
-            vad.process_chunk, audio_data
+            _run_vad_process_chunk, vad, audio_data
         )
         
         print(f"[DEBUG] VAD: is_speech={is_speech}, is_speaking={is_speaking}, speech_ended={speech_ended}, buffer={len(session.audio_buffer)}", flush=True)
@@ -390,7 +404,7 @@ async def process_audio_pipeline(
             session.audio_buffer.clear()
             
             # Reset VAD for next utterance
-            vad.reset()
+            await asyncio.to_thread(_run_vad_reset, vad)
             
             # Start pipeline trace
             tracer = get_tracer()
@@ -823,7 +837,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger.info("control_message", type=msg_type, client_id=client_id)
                     
                     if msg_type == "start_listening":
-                        print(f"[DEBUG] START_LISTENING - setting state to LISTENING", flush=True)
+                        print("[DEBUG] START_LISTENING - setting state to LISTENING", flush=True)
                         session.set_state(SessionState.LISTENING)
                         session.audio_buffer.clear()
                         await manager.send_json(client_id, {
