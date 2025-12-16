@@ -13,15 +13,16 @@ from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
 import threading
+import uuid
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 import time
 from collections import deque
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import structlog
 
-from .config import settings
+from .config import Settings, get_settings, settings
 from .session import Session, SessionState
 from .audio.vad import create_vad, SileroVAD
 from .stt.whisper import get_stt  # faster-whisper with CUDA
@@ -85,30 +86,21 @@ def record_log(level: str, message: str, **payload) -> None:
 
 
 def require_admin(
+    request: Request,
     token: str = Header(default=None, alias="X-Admin-Token"),
     authorization: Optional[str] = Header(default=None, alias="Authorization")
 ) -> None:
     # Mixed-mode admin protection. If multi-user auth is enabled, accept Bearer tokens
     if settings.enable_auth:
-        # Try Authorization header (Bearer) first
-        # FastAPI will pass Authorization header via Header param, but we read 'token' alias here for X-Admin-Token
-        # So handle both: Authorization: Bearer <token> and X-Admin-Token header
-        # Prefer Authorization header when provided
-        if authorization:
-            # Accept 'Bearer <token>' or bare token
-            if authorization.lower().startswith("bearer "):
-                auth_token = authorization.split(" ", 1)[1]
-            else:
-                auth_token = authorization
-            # If explicit X-Admin-Token header not provided, use Authorization token
-            if not token:
-                token = auth_token
-    # fallback; the header name is token alias X-Admin-Token passed via the parameter
-        # Note: We cannot easily request Authorization header here in the signature because param name must be valid
-        # So check token header first and fall back to env-based admin token
-        if not token:
+        # Accept, in order:
+        #  1) Authorization: Bearer <token>
+        #  2) X-Admin-Token: <token>
+        #  3) Cookie felix_session (normal UI login)
+        auth_token = _resolve_auth_token(request, authorization, token)
+        if not auth_token:
             raise HTTPException(status_code=401, detail="Authentication required")
-        username = get_auth_manager().validate_token(token)
+
+        username = get_auth_manager().validate_token(auth_token)
         if not username:
             raise HTTPException(status_code=401, detail="Invalid auth token")
         if not get_auth_manager().is_admin(username):
@@ -119,6 +111,47 @@ def require_admin(
             raise HTTPException(status_code=401, detail="Admin access disabled")
         if token != settings.admin_token:
             raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+def _extract_token_from_header(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    if authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1]
+    return authorization
+
+
+def _resolve_auth_token(
+    request: Request,
+    authorization: Optional[str],
+    token: Optional[str]
+) -> Optional[str]:
+    token_value = _extract_token_from_header(authorization)
+    if not token_value and token:
+        token_value = token
+    if not token_value:
+        token_value = request.cookies.get("felix_session")
+    return token_value
+
+
+def get_current_user_from_cookie(
+    request: Request,
+    settings: Settings = Depends(get_settings)
+) -> Optional[str]:
+    if not settings.enable_auth:
+        return None
+    session = get_auth_manager().get_session_from_cookie(request)
+    return session.username if session else None
+
+
+def require_auth_cookie(
+    request: Request,
+    settings: Settings = Depends(get_settings)
+) -> str:
+    username = get_current_user_from_cookie(request, settings)
+    if username is None and settings.enable_auth:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return username
 
 
 @asynccontextmanager
@@ -359,7 +392,7 @@ async def admin_logs_feed(_: None = Depends(require_admin)):
 
 
 @app.post("/api/auth/login")
-async def api_login(payload: dict):
+async def api_login(payload: dict, response: Response, request: Request):
     """Simple login endpoint that returns a session token.
 
     Request body: {"username": "user", "password": "pass"}
@@ -370,22 +403,176 @@ async def api_login(payload: dict):
     password = payload.get("password")
     if not username or not password:
         raise HTTPException(status_code=400, detail="username and password required")
-    token, msg = get_auth_manager().login(username, password)
+    client_ip = request.client.host if request.client else ""
+    token, msg = get_auth_manager().login(username, password, ip_address=client_ip)
     if token is None:
         raise HTTPException(status_code=401, detail=msg)
+    get_auth_manager().create_session_cookie(username, response, token=token)
     return {"token": token, "message": msg}
 
 
 @app.post("/api/auth/logout")
-async def api_logout(payload: dict):
-    """Invalidate a token: {"token": "..."}"""
+async def api_logout(
+    response: Response,
+    request: Request,
+    payload: Optional[dict] = None
+):
+    """Invalidate a token by clearing the cookie."""
     if not settings.enable_auth:
         raise HTTPException(status_code=400, detail="Multi-user auth disabled")
-    token = payload.get("token")
+    token = (payload or {}).get("token")
     if not token:
-        raise HTTPException(status_code=400, detail="token required")
-    success = get_auth_manager().logout(token)
-    return {"success": success}
+        token = request.cookies.get("felix_session")
+    if token:
+        get_auth_manager().logout(token)
+    response.delete_cookie(key="felix_session", path="/")
+    return {"success": True}
+
+
+@app.post("/api/auth/register")
+async def api_register(payload: dict, _: None = Depends(require_admin)):
+    """Create a new user (admin only).
+    
+    Request body: {"username": "user", "password": "pass", "is_admin": false}
+    """
+    if not settings.enable_auth:
+        raise HTTPException(status_code=400, detail="Multi-user auth disabled")
+    username = payload.get("username")
+    password = payload.get("password")
+    is_admin = payload.get("is_admin", False)
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password required")
+    success, msg = get_auth_manager().create_user(username, password, is_admin)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg}
+
+
+@app.get("/api/auth/users")
+async def api_list_users(_: None = Depends(require_admin)):
+    """List all users (admin only)."""
+    if not settings.enable_auth:
+        raise HTTPException(status_code=400, detail="Multi-user auth disabled")
+    users = get_auth_manager().list_users()
+    return {"users": users}
+
+
+@app.delete("/api/auth/users/{username}")
+async def api_delete_user(
+    username: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    token: str = Header(default=None, alias="X-Admin-Token"),
+    _: None = Depends(require_admin)
+):
+    """Delete a user (admin only)."""
+    if not settings.enable_auth:
+        raise HTTPException(status_code=400, detail="Multi-user auth disabled")
+    
+    # Get the requesting user from token
+    auth_token = None
+    if authorization:
+        if authorization.lower().startswith("bearer "):
+            auth_token = authorization.split(" ", 1)[1]
+        else:
+            auth_token = authorization
+    if not auth_token:
+        auth_token = token
+    
+    requester = get_auth_manager().validate_token(auth_token) or "admin"
+    success, msg = get_auth_manager().delete_user(username, requester)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": msg}
+
+
+@app.get("/api/auth/user")
+async def api_get_current_user(
+    request: Request,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    token: Optional[str] = Header(default=None, alias="X-Admin-Token")
+):
+    """Get current authenticated user's info."""
+    if not settings.enable_auth:
+        return {"user": None, "auth_enabled": False}
+    
+    # Frontend uses this endpoint to decide whether to show the login modal.
+    # Prefer the normal cookie-based auth flow; fall back to bearer/admin tokens.
+    username = get_current_user_from_cookie(request, settings)
+    if not username:
+        auth_token = _extract_token_from_header(authorization)
+        if not auth_token and token:
+            auth_token = token
+        if auth_token:
+            username = get_auth_manager().validate_token(auth_token)
+
+    if not username:
+        return {"user": None, "auth_enabled": True}
+    
+    user = get_auth_manager().get_user(username)
+    if not user:
+        return {"user": None, "auth_enabled": True}
+    
+    return {
+        "user": {
+            "username": user.username,
+            "is_admin": user.is_admin,
+            "created_at": user.created_at,
+            "last_login": user.last_login,
+        },
+        "auth_enabled": True
+    }
+
+
+@app.get("/api/auth/settings")
+async def api_get_user_settings(
+    request: Request,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    token: Optional[str] = Header(default=None, alias="X-Admin-Token")
+):
+    """Get current user's settings."""
+    if not settings.enable_auth:
+        # Return localStorage-based settings if auth disabled
+        return {"settings": {}, "auth_enabled": False}
+    
+    # Get token
+    auth_token = _resolve_auth_token(request, authorization, token)
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    username = get_auth_manager().validate_token(auth_token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_settings = get_auth_manager().get_user_settings(username)
+    return {"settings": user_settings, "auth_enabled": True}
+
+
+@app.put("/api/auth/settings")
+async def api_save_user_settings(
+    payload: dict,
+    request: Request,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    token: Optional[str] = Header(default=None, alias="X-Admin-Token")
+):
+    """Save user's settings."""
+    if not settings.enable_auth:
+        raise HTTPException(status_code=400, detail="Multi-user auth disabled")
+    
+    # Get token
+    auth_token = _resolve_auth_token(request, authorization, token)
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    username = get_auth_manager().validate_token(auth_token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_settings = payload.get("settings", {})
+    success = get_auth_manager().save_user_settings(username, user_settings)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save settings")
+    
+    return {"success": True, "message": "Settings saved"}
 
 
 @app.get("/api/voices")
@@ -404,7 +591,7 @@ async def get_models(
     Get available LLM models for a backend.
     
     Args:
-        backend: Backend type (ollama, lmstudio, openai)
+        backend: Backend type (ollama, lmstudio, openai, openrouter)
         url: Backend URL (uses defaults if not provided)
         api_key: API key (for OpenAI-compatible backends)
     """
@@ -609,13 +796,20 @@ def _save_sessions_to_disk_sync() -> None:
                 }
             except Exception:
                 logger.exception("Failed to serialize session", client_id=cid)
-        # Write atomically: write to tmp then replace
-        tmp_path = path.with_suffix('.tmp')
-        with open(tmp_path, 'w') as f:
-            json.dump(out, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
+        # Write atomically: write to unique tmp then replace
+        unique_name = f"sessions.tmp.{uuid.uuid4().hex}"
+        tmp_path = path.parent / unique_name
+        try:
+            with open(tmp_path, 'w') as f:
+                json.dump(out, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        except Exception:
+            # Clean up the specific temp file if something failed before the replace
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
     except Exception:
         logger.exception("Failed to save sessions.json")
 
@@ -1237,7 +1431,6 @@ async def process_text_message(
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time audio communication."""
-    import uuid
     client_id = str(uuid.uuid4())[:8]
     
     await manager.connect(websocket, client_id)

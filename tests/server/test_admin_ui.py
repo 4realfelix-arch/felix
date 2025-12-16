@@ -12,7 +12,7 @@ def test_admin_static_files_available():
 
     r = client.get('/admin.html')
     assert r.status_code == 200
-    assert '<title>Voice Agent Admin</title>' in r.text
+    assert '<title>Felix Admin Dashboard</title>' in r.text
 
     r2 = client.get('/static/admin.js')
     assert r2.status_code == 200

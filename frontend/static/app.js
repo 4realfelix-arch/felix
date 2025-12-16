@@ -16,6 +16,9 @@ class VoiceAgentApp {
         this.isConnected = false;
         this.isListening = false;
         this.currentState = 'idle';
+        this.isAuthenticated = false;
+        this.authToken = localStorage.getItem('felix-auth-token');
+        this.userInfo = null;
         
         // Settings
         this.settings = {
@@ -66,6 +69,18 @@ class VoiceAgentApp {
             voiceSelect: document.getElementById('voiceSelect'),
             modelSelect: document.getElementById('modelSelect'),
             autoListen: document.getElementById('autoListen'),
+
+            // Login modal
+            loginModal: document.getElementById('loginModal'),
+            loginForm: document.getElementById('loginForm'),
+            registerForm: document.getElementById('registerForm'),
+            loginUsername: document.getElementById('loginUsername'),
+            loginPassword: document.getElementById('loginPassword'),
+            registerUsername: document.getElementById('registerUsername'),
+            registerPassword: document.getElementById('registerPassword'),
+            registerConfirmPassword: document.getElementById('registerConfirmPassword'),
+            acceptTerms: document.getElementById('acceptTerms'),
+            rememberMe: document.getElementById('rememberMe'),
         };
         
         // Waveform canvas
@@ -80,9 +95,8 @@ class VoiceAgentApp {
         this.drawWaveform = this.drawWaveform.bind(this);
         
         // Initialize
-        this.loadSettings();
         this.setupEventListeners();
-        this.connect();
+        this.checkAuthRequired();
     }
     
     setupEventListeners() {
@@ -123,9 +137,69 @@ class VoiceAgentApp {
                 this.toggleFlyout(flyoutType);
             });
         });
-        
+
         // Flyout close
         this.elements.flyoutClose.addEventListener('click', () => this.closeFlyout());
+
+        // Login modal tabs
+        document.querySelectorAll('.login-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const formType = tab.dataset.form;
+
+                // Update active tab
+                document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Show form
+                document.querySelectorAll('.login-form').forEach(f => f.classList.remove('active'));
+                document.getElementById(`${formType}Form`).classList.add('active');
+            });
+        });
+
+        // Login form
+        this.elements.loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = this.elements.loginUsername.value.trim();
+            const password = this.elements.loginPassword.value;
+            const rememberMe = this.elements.rememberMe.checked;
+
+            if (!username || !password) {
+                alert('Please enter both username and password');
+                return;
+            }
+
+            this.handleLogin(username, password, rememberMe);
+        });
+
+        // Register form
+        this.elements.registerForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const username = this.elements.registerUsername.value.trim();
+            const password = this.elements.registerPassword.value;
+            const confirmPassword = this.elements.registerConfirmPassword.value;
+            const acceptTerms = this.elements.acceptTerms.checked;
+
+            if (!username || !password) {
+                alert('Please fill in all fields');
+                return;
+            }
+
+            this.handleRegister(username, password, confirmPassword, acceptTerms);
+        });
+
+        // Close login modal on backdrop click
+        this.elements.loginModal.addEventListener('click', (e) => {
+            if (e.target === this.elements.loginModal) {
+                this.closeLoginModal();
+            }
+        });
+
+        // Logout button
+        document.getElementById('logoutBtn')?.addEventListener('click', () => {
+            if (confirm('Are you sure you want to sign out?')) {
+                this.logout();
+            }
+        });
         
         // URL bar enter key
         this.elements.flyoutUrl.addEventListener('keypress', (e) => {
@@ -322,13 +396,171 @@ class VoiceAgentApp {
     }
     
     // ========================================
+    // Authentication
+    // ========================================
+
+    async checkAuthRequired() {
+        try {
+            // Check if auth is enabled by trying to get current user info
+            const response = await fetch('/api/auth/user');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.auth_enabled) {
+                    // Auth is enabled, check if we have a valid token
+                    if (this.authToken) {
+                        // Try to validate token
+                        const userResponse = await fetch('/api/auth/user', {
+                            headers: { 'Authorization': `Bearer ${this.authToken}` }
+                        });
+                        if (userResponse.ok) {
+                            const userData = await userResponse.json();
+                            this.userInfo = userData.user;
+                            this.isAuthenticated = true;
+                            this.initializeApp();
+                            return;
+                        }
+                    }
+                    // No valid token, show login
+                    this.showLoginModal();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('Auth check failed, proceeding without auth:', e);
+        }
+
+        // Auth disabled or failed, proceed normally
+        this.initializeApp();
+    }
+
+    showLoginModal() {
+        // Switch to login tab
+        document.querySelectorAll('.login-tab').forEach(tab => tab.classList.remove('active'));
+        document.querySelector('[data-form="login"]').classList.add('active');
+
+        document.querySelectorAll('.login-form').forEach(form => form.classList.remove('active'));
+        this.elements.loginForm.classList.add('active');
+
+        this.elements.loginModal.classList.add('visible');
+    }
+
+    closeLoginModal() {
+        this.elements.loginModal.classList.remove('visible');
+    }
+
+    async handleLogin(username, password, rememberMe) {
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || 'Login failed');
+            }
+
+            // Store token
+            this.authToken = data.token;
+            if (rememberMe) {
+                localStorage.setItem('felix-auth-token', this.authToken);
+            } else {
+                sessionStorage.setItem('felix-auth-token', this.authToken);
+            }
+
+            this.isAuthenticated = true;
+
+            // Get user info
+            const userResponse = await fetch('/api/auth/user', {
+                headers: { 'Authorization': `Bearer ${this.authToken}` }
+            });
+            if (userResponse.ok) {
+                const userData = await userResponse.json();
+                this.userInfo = userData.user;
+            }
+
+            this.closeLoginModal();
+            this.updateAuthUI();
+            this.initializeApp();
+
+        } catch (error) {
+            alert('Login failed: ' + error.message);
+        }
+    }
+
+    async handleRegister(username, password, confirmPassword, acceptTerms) {
+        if (password !== confirmPassword) {
+            alert('Passwords do not match');
+            return;
+        }
+
+        if (!acceptTerms) {
+            alert('Please accept the terms of service');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || 'Registration failed');
+            }
+
+            alert('Account created successfully! You can now sign in.');
+            // Switch to login form
+            document.querySelector('[data-form="login"]').click();
+
+        } catch (error) {
+            alert('Registration failed: ' + error.message);
+        }
+    }
+
+    logout() {
+        this.authToken = null;
+        this.userInfo = null;
+        this.isAuthenticated = false;
+        localStorage.removeItem('felix-auth-token');
+        sessionStorage.removeItem('felix-auth-token');
+        this.updateAuthUI();
+        this.showLoginModal();
+    }
+
+    initializeApp() {
+        this.updateAuthUI();
+        this.loadSettings();
+        this.connect();
+    }
+
+    updateAuthUI() {
+        const authSection = document.getElementById('authSection');
+        const currentUser = document.getElementById('currentUser');
+
+        if (this.isAuthenticated && this.userInfo) {
+            authSection.style.display = 'block';
+            currentUser.textContent = this.userInfo.username;
+        } else {
+            authSection.style.display = 'none';
+            currentUser.textContent = '—';
+        }
+    }
+
+    // ========================================
     // Settings
     // ========================================
-    
-    loadSettings() {
+
+    async loadSettings() {
         const validVoices = ['amy', 'lessac', 'ryan'];
         const validThemes = ['midnight', 'redroom', 'pink', 'babyblue', 'teal', 'emerald', 'sunset', 'cyberpunk', 'ocean', 'rose'];
-        
+
+        // First load from localStorage as fallback
         try {
             const saved = localStorage.getItem('voiceAgentSettings');
             if (saved) {
@@ -342,37 +574,77 @@ class VoiceAgentApp {
                 this.settings = { ...this.settings, ...parsed };
             }
         } catch (e) {
-            console.error('Failed to load settings:', e);
+            console.error('Failed to load settings from localStorage:', e);
         }
-        
+
+        // If authenticated, try to load settings from server
+        if (this.isAuthenticated && this.authToken) {
+            try {
+                const response = await fetch('/api/auth/settings', {
+                    headers: { 'Authorization': `Bearer ${this.authToken}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.settings && Object.keys(data.settings).length > 0) {
+                        // Server settings take priority
+                        this.settings = { ...this.settings, ...data.settings };
+                        console.log('Loaded settings from server');
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load settings from server, using local:', e);
+            }
+        }
+
+        // Validate settings
         if (!validVoices.includes(this.settings.voice)) {
             this.settings.voice = 'amy';
         }
         if (!validThemes.includes(this.settings.theme)) {
             this.settings.theme = 'midnight';
         }
-        
+
         // Update UI
         this.elements.voiceSelect.value = this.settings.voice;
         this.elements.modelSelect.value = this.settings.model;
         this.elements.autoListen.checked = this.settings.autoListen;
         this.elements.modelName.textContent = this.settings.model.split(':')[0];
-        
+
         // Apply theme
-        this.applyTheme(this.settings.theme);
+        this.applyTheme(this.settings.theme, false); // Don't save yet
         this.updateThemeSwatches();
-        
+
+        // Save to localStorage
         localStorage.setItem('voiceAgentSettings', JSON.stringify(this.settings));
     }
     
-    saveSettings() {
+    async saveSettings() {
         this.settings.voice = this.elements.voiceSelect.value;
         this.settings.model = this.elements.modelSelect.value;
         this.settings.autoListen = this.elements.autoListen.checked;
-        
+
+        // Always save to localStorage
         localStorage.setItem('voiceAgentSettings', JSON.stringify(this.settings));
         this.elements.modelName.textContent = this.settings.model.split(':')[0];
-        
+
+        // If authenticated, also save to server
+        if (this.isAuthenticated && this.authToken) {
+            try {
+                await fetch('/api/auth/settings', {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ settings: this.settings })
+                });
+                console.log('Settings saved to server');
+            } catch (e) {
+                console.warn('Failed to save settings to server:', e);
+            }
+        }
+
+        // Notify server via WebSocket
         if (this.isConnected) {
             this.send({
                 type: 'settings',
@@ -409,8 +681,16 @@ class VoiceAgentApp {
     
     connect() {
         this.updateStatus('connecting', 'Connecting...');
-        
-        this.ws = new WebSocket(this.wsUrl);
+
+        // Include auth token in WebSocket URL if authenticated
+        let wsUrl = this.wsUrl;
+        if (this.isAuthenticated && this.authToken) {
+            const url = new URL(wsUrl.replace('ws://', 'http://').replace('wss://', 'https://'));
+            url.searchParams.set('token', this.authToken);
+            wsUrl = url.toString().replace('http://', 'ws://').replace('https://', 'wss://');
+        }
+
+        this.ws = new WebSocket(wsUrl);
         
         this.ws.onopen = () => {
             this.isConnected = true;

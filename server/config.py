@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     # Admin/Auth settings
     admin_token: str = Field(default="", description="Token to protect admin dashboard (leave empty to disable)")
     session_timeout: int = Field(default=3600, description="Session timeout seconds")
-    enable_auth: bool = Field(default=False, description="Enable multi-user auth")
+    enable_auth: bool = Field(default=True, description="Enable multi-user auth")
     
     # Data persistence
     data_dir: str = Field(default="data", description="Directory to store user/session data")

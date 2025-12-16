@@ -421,6 +421,53 @@ header h1 {
 .status-dot.error { background: var(--accent-danger); animation: pulse-glow 0.5s infinite; }
 .status-dot.connecting { background: var(--accent-warning); animation: pulse-glow 1s infinite; }
 
+/* Subsystem status lights (Chat / STT / TTS) */
+.status-lights {
+    gap: 0.4rem;
+}
+
+.status-light {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--text-muted);
+    box-shadow: none;
+    padding: 0;
+    cursor: pointer;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+.status-light:hover {
+    transform: scale(1.12);
+}
+
+.status-light.good {
+    background: var(--accent-success);
+    box-shadow: 0 0 10px rgba(46, 204, 113, 0.35);
+}
+
+.status-light.warn {
+    background: var(--accent-warning);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);
+}
+
+.status-light.bad {
+    background: var(--accent-danger);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.35);
+}
+
+.status-light.off {
+    background: var(--text-muted);
+    box-shadow: none;
+}
+
+/* Thin ring when user has overridden the derived status */
+.status-light.override {
+    outline: 2px solid rgba(255, 255, 255, 0.35);
+    outline-offset: 2px;
+}
+
 @keyframes pulse-glow {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.6; transform: scale(1.2); }
@@ -937,6 +984,7 @@ header h1 {
 .flyout-title-icon.code { background: var(--accent-success); }
 .flyout-title-icon.terminal { background: var(--accent-secondary); }
 .flyout-title-icon.preview { background: var(--accent-warning); }
+.flyout-title-icon.audio { background: var(--accent-primary); }
 
 .flyout-title-icon svg {
     width: 18px;
@@ -1066,6 +1114,26 @@ header h1 {
     right: var(--flyout-width);
 }
 
+/* Audio flyout */
+.flyout-audio {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+.flyout-audio .flyout-section {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem;
+}
+
+.flyout-audio .flyout-section h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1rem;
+}
+
 .flyout-tab {
     width: 44px;
     height: 44px;
@@ -1102,6 +1170,26 @@ header h1 {
 /* ========================================
    Settings Modal
 ======================================== */
+
+.inline-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.backend-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.backend-status.ok {
+    color: var(--success-color, #2ecc71);
+}
+
+.backend-status.bad {
+    color: var(--danger-color, #e74c3c);
+}
 
 .modal {
     position: fixed;
@@ -1388,6 +1476,135 @@ header h1 {
     border-radius: 4px;
     font-family: monospace;
     font-size: 0.7rem;
+}
+
+/* Login Modal */
+.login-modal {
+    max-width: 400px;
+    text-align: center;
+}
+
+.login-modal h2 {
+    margin-bottom: 0.5rem;
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.login-subtitle {
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+    font-size: 0.9rem;
+}
+
+.login-tabs {
+    display: flex;
+    background: var(--bg-glass);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 2rem;
+}
+
+.login-tab {
+    flex: 1;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.login-tab.active {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+}
+
+.login-form {
+    display: none;
+}
+
+.login-form.active {
+    display: block;
+}
+
+.login-form .form-group {
+    text-align: left;
+    margin-bottom: 1.25rem;
+}
+
+.login-form .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.login-form .form-group input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: border-color var(--transition-fast);
+}
+
+.login-form .form-group input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.form-options {
+    text-align: left;
+    margin-bottom: 1.5rem;
+}
+
+.checkbox-label {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin: 0;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-primary);
+}
+
+.btn-full {
+    width: 100%;
+    margin-top: 1rem;
+}
+
+.login-footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.login-footer p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.login-footer code {
+    background: var(--bg-glass);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
 }
 
 /* Shortcuts Modal */

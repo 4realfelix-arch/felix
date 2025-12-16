@@ -29,6 +29,11 @@ const DEFAULT_SETTINGS = {
     autoListen: true,
     showTimestamps: false,
     pushToTalkKey: 'Space',
+
+    // Status light overrides (null = auto/derived)
+    statusOverrideChat: null,
+    statusOverrideStt: null,
+    statusOverrideTts: null,
 };
 
 // Valid options for validation
@@ -37,6 +42,8 @@ const VALID_OPTIONS = {
     voice: ['amy', 'lessac', 'ryan'],
     llmBackend: ['ollama', 'lmstudio', 'openai', 'openrouter'],
 };
+
+const VALID_STATUS_OVERRIDE = [null, 'good', 'warn', 'bad', 'off'];
 
 const STORAGE_KEY = 'voiceAgentSettings';
 
@@ -150,6 +157,17 @@ function validateSettings(settings) {
     // Clamp numeric values
     validated.volume = Math.min(100, Math.max(0, Number(validated.volume) || DEFAULT_SETTINGS.volume));
     validated.voiceSpeed = Math.min(200, Math.max(50, Number(validated.voiceSpeed) || DEFAULT_SETTINGS.voiceSpeed));
+
+    // Status overrides
+    if (!VALID_STATUS_OVERRIDE.includes(validated.statusOverrideChat)) {
+        validated.statusOverrideChat = DEFAULT_SETTINGS.statusOverrideChat;
+    }
+    if (!VALID_STATUS_OVERRIDE.includes(validated.statusOverrideStt)) {
+        validated.statusOverrideStt = DEFAULT_SETTINGS.statusOverrideStt;
+    }
+    if (!VALID_STATUS_OVERRIDE.includes(validated.statusOverrideTts)) {
+        validated.statusOverrideTts = DEFAULT_SETTINGS.statusOverrideTts;
+    }
     
     // Ensure booleans
     validated.autoListen = Boolean(validated.autoListen);

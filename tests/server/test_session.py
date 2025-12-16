@@ -156,7 +156,7 @@ class TestSessionStateTransitions:
         assert not session.should_stop()
 
 
-def test_session_persistence_roundtrip(tmp_path, monkeypatch):
+async def test_session_persistence_roundtrip(tmp_path, monkeypatch):
     """Test that sessions saved to disk are restored on load."""
     from server.main import manager, save_sessions_to_disk, load_sessions_from_disk
     from server.session import Session, SessionState
@@ -176,7 +176,7 @@ def test_session_persistence_roundtrip(tmp_path, monkeypatch):
     manager.sessions['testclient'] = s
 
     # Persist to disk
-    save_sessions_to_disk()
+    await save_sessions_to_disk()
 
     # Clear in-memory sessions
     manager.sessions.clear()

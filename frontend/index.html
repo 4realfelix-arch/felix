@@ -44,6 +44,12 @@
                     <div class="status-dot" id="statusDot"></div>
                     <span id="statusText">Connecting...</span>
                 </div>
+
+                <div class="status-item status-lights" id="statusLights" title="Subsystem status (click lights to override)">
+                    <button type="button" class="status-light" id="lightChat" data-subsystem="chat" aria-label="Chat/LLM status" title="Chat/LLM"></button>
+                    <button type="button" class="status-light" id="lightStt" data-subsystem="stt" aria-label="STT status" title="STT"></button>
+                    <button type="button" class="status-light" id="lightTts" data-subsystem="tts" aria-label="TTS status" title="TTS"></button>
+                </div>
                 <div class="status-item" id="modelInfo">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -300,6 +306,11 @@
                     <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H5V5h14v14zM12 8.5c1.93 0 3.5 1.57 3.5 3.5s-1.57 3.5-3.5 3.5-3.5-1.57-3.5-3.5 1.57-3.5 3.5-3.5zm0 5c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5-1.5.67-1.5 1.5.67 1.5 1.5 1.5z"/>
                 </svg>
             </button>
+            <button class="flyout-tab" data-flyout="audio" title="Audio">
+                <svg viewBox="0 0 24 24">
+                    <path d="M3 10v4h2l3 3V7L5 10H3zm13.5 2c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                </svg>
+            </button>
             <button class="flyout-tab" data-flyout="history" title="Chat History">
                 <svg viewBox="0 0 24 24">
                     <path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/>
@@ -392,42 +403,7 @@
                 </div>
             </div>
             
-            <div class="settings-section">
-                <h3>🔊 Audio</h3>
-                
-                <div class="setting">
-                    <label for="volumeSlider">
-                        <span>Speaker Volume</span>
-                        <span class="setting-value" id="volumeValue">80%</span>
-                    </label>
-                    <input type="range" id="volumeSlider" min="0" max="100" value="80" class="slider">
-                </div>
-                
-                <div class="setting">
-                    <label for="voiceSpeedSlider">
-                        <span>Voice Speed</span>
-                        <span class="setting-value" id="voiceSpeedValue">1.0x</span>
-                    </label>
-                    <input type="range" id="voiceSpeedSlider" min="50" max="200" value="100" class="slider">
-                </div>
-                
-                <button class="btn btn-secondary test-audio-btn" id="testAudioBtn">
-                    🔊 Test Audio
-                </button>
-            </div>
-            
-            <div class="settings-section">
-                <h3>🎤 Voice</h3>
-                
-                <div class="setting">
-                    <label for="voiceSelect">Voice Style</label>
-                    <select id="voiceSelect">
-                        <option value="amy">Amy (Female, Natural)</option>
-                        <option value="lessac">Lessac (Female, Expressive)</option>
-                        <option value="ryan">Ryan (Male, High Quality)</option>
-                    </select>
-                </div>
-            </div>
+            <!-- Audio/Voice settings moved into the new Audio flyout -->
             
             <div class="settings-section">
                 <h3>🔌 Backend</h3>
@@ -437,9 +413,18 @@
                     <select id="backendSelect">
                         <option value="ollama">Ollama (localhost:11434)</option>
                         <option value="lmstudio">LM Studio (localhost:1234)</option>
-                        <option value="openai">OpenAI Compatible</option>
                         <option value="openrouter">OpenRouter (100+ models)</option>
+                        <option value="openai">Custom OpenAI-Compatible Endpoint</option>
                     </select>
+                </div>
+
+                <div class="setting">
+                    <label>Backend status</label>
+                    <div class="inline-controls">
+                        <button class="btn secondary" type="button" id="testBackendBtn">Test connection</button>
+                        <span class="backend-status" id="backendStatus" aria-live="polite">Not checked</span>
+                    </div>
+                    <div class="setting-hint">Uses the model list endpoint to quickly verify the selected backend is reachable.</div>
                 </div>
                 
                 <div class="setting backend-url-setting" id="ollamaUrlSetting">
@@ -453,7 +438,7 @@
                 </div>
                 
                 <div class="setting backend-url-setting hidden" id="openaiUrlSetting">
-                    <label for="openaiUrl">OpenAI API URL</label>
+                    <label for="openaiUrl">OpenAI-compatible URL</label>
                     <input type="text" id="openaiUrl" value="https://api.openai.com" placeholder="https://api.openai.com">
                 </div>
                 
@@ -503,11 +488,21 @@
 
             <div class="settings-section">
                 <h3>👤 Profile</h3>
-                
+
                 <button class="btn btn-secondary" id="startOnboardingBtn" style="width: 100%;">
                     🎯 Start Onboarding
                 </button>
                 <p class="setting-hint">Let Felix learn about you through a guided questionnaire</p>
+
+                <div id="authSection" style="display: none; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                    <div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                        <span style="font-size: 0.9rem; color: var(--text-secondary);">Logged in as:</span>
+                        <span style="font-weight: 500;" id="currentUser">—</span>
+                    </div>
+                    <button class="btn btn-danger" id="logoutBtn" style="width: 100%;">
+                        🚪 Sign Out
+                    </button>
+                </div>
             </div>
             
             <div class="modal-actions">
@@ -524,6 +519,65 @@
     <!-- Keyboard hint -->
     <div class="keyboard-hint">
         Press <span class="key">Space</span> to talk • <span class="key">?</span> for shortcuts
+    </div>
+
+    <!-- Login Modal -->
+    <div class="modal" id="loginModal">
+        <div class="modal-content login-modal">
+            <h2>👋 Welcome to Felix</h2>
+            <p class="login-subtitle">Your personal voice assistant</p>
+
+            <div class="login-tabs">
+                <button class="login-tab active" data-form="login">Sign In</button>
+                <button class="login-tab" data-form="register">Sign Up</button>
+            </div>
+
+            <!-- Login Form -->
+            <form class="login-form active" id="loginForm">
+                <div class="form-group">
+                    <label for="loginUsername">Username</label>
+                    <input type="text" id="loginUsername" placeholder="Enter your username" required>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password" required>
+                </div>
+                <div class="form-options">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="rememberMe" checked>
+                        <span>Remember me</span>
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+            </form>
+
+            <!-- Register Form -->
+            <form class="login-form" id="registerForm">
+                <div class="form-group">
+                    <label for="registerUsername">Username</label>
+                    <input type="text" id="registerUsername" placeholder="Choose a username" required>
+                </div>
+                <div class="form-group">
+                    <label for="registerPassword">Password</label>
+                    <input type="password" id="registerPassword" placeholder="Create a password" required>
+                </div>
+                <div class="form-group">
+                    <label for="registerConfirmPassword">Confirm Password</label>
+                    <input type="password" id="registerConfirmPassword" placeholder="Confirm your password" required>
+                </div>
+                <div class="form-options">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="acceptTerms">
+                        <span>I accept the <a href="#" style="color: var(--accent-primary);">terms of service</a></span>
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary btn-full">Create Account</button>
+            </form>
+
+            <div class="login-footer">
+                <p>Default admin: <code>admin</code> / <code>felix2024</code></p>
+            </div>
+        </div>
     </div>
 
     <!-- Keyboard Shortcuts Modal -->

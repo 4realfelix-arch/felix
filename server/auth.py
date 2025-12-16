@@ -10,7 +10,8 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
+from fastapi import Request, Response
 import structlog
 
 logger = structlog.get_logger()
@@ -20,8 +21,8 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 USERS_FILE = DATA_DIR / "users.json"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 
-# Token expiry (24 hours)
-TOKEN_EXPIRY_HOURS = 24
+# Token expiry (30 days)
+TOKEN_EXPIRY_HOURS = 720
 
 
 @dataclass
@@ -82,6 +83,59 @@ class AuthManager:
         self._load_users()
         self._load_sessions()
         self._ensure_admin()
+
+    def _create_session(self, username: str, ip_address: str = "") -> str:
+        """Create a new session token for a user."""
+        token = _generate_token()
+        now = time.time()
+        session = AuthSession(
+            token=token,
+            username=username,
+            created_at=now,
+            expires_at=now + (TOKEN_EXPIRY_HOURS * 3600),
+            ip_address=ip_address
+        )
+        self._sessions[token] = session
+        self._save_sessions()
+        return token
+
+    def create_session_cookie(
+        self,
+        username: str,
+        response: Response,
+        token: Optional[str] = None,
+        ip_address: str = ""
+    ) -> str:
+        """Create or reuse a session and set an HTTP-only cookie."""
+        if token and token in self._sessions:
+            session_token = token
+        else:
+            session_token = self._create_session(username, ip_address)
+        session = self._sessions.get(session_token)
+        if not session:
+            session_token = self._create_session(username, ip_address)
+            session = self._sessions[session_token]
+        remaining = max(0, int(session.expires_at - time.time()))
+        response.set_cookie(
+            key="felix_session",
+            value=session_token,
+            max_age=remaining or TOKEN_EXPIRY_HOURS * 3600,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/"
+        )
+        logger.info("session_cookie_set", username=username)
+        return session_token
+
+    def get_session_from_cookie(self, request: Request) -> Optional[AuthSession]:
+        """Retrieve a session from the HTTP cookie."""
+        token = request.cookies.get("felix_session")
+        if not token:
+            return None
+        if not self.validate_token(token):
+            return None
+        return self._sessions.get(token)
     
     def _ensure_data_dir(self):
         """Ensure data directory exists."""
@@ -124,6 +178,11 @@ class AuthManager:
                     data = json.load(f)
                     now = time.time()
                     for token, session_data in data.items():
+                        # Handle backwards compatibility - remove unknown fields
+                        session_data.pop('state', None)
+                        session_data.pop('last_activity', None)
+                        session_data.pop('speaking_started', None)
+                        session_data.pop('messages', None)
                         session = AuthSession(**session_data)
                         # Only load non-expired sessions
                         if session.expires_at > now:
@@ -288,21 +347,11 @@ class AuthManager:
             return None, "Invalid username or password"
         
         # Create session
-        token = _generate_token()
-        now = time.time()
-        session = AuthSession(
-            token=token,
-            username=username,
-            created_at=now,
-            expires_at=now + (TOKEN_EXPIRY_HOURS * 3600),
-            ip_address=ip_address
-        )
-        self._sessions[token] = session
+        token = self._create_session(username, ip_address)
         
         # Update last login
         user.last_login = datetime.now().isoformat()
         self._save_users()
-        self._save_sessions()
         
         logger.info("login_success", username=username, ip=ip_address)
         return token, "Login successful"

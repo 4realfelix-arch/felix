@@ -851,16 +851,20 @@ class LLMClient:
                 response = await client.get(models_path)
                 logger.info("openrouter_response", status_code=response.status_code, url=f"{self.base_url}{models_path}")
                 if response.status_code == 200:
-                    data = response.json()
-                    models = []
-                    for model in data.get("data", []):
-                        model_id = model.get("id", "")
-                        models.append({
-                            "name": model_id,
-                            "owned_by": model.get("owned_by", ""),
-                        })
-                    logger.info("openrouter_models_count", count=len(models))
-                    return models
+                    try:
+                        data = response.json()
+                        models = []
+                        for model in data.get("data", []):
+                            model_id = model.get("id", "")
+                            models.append({
+                                "name": model_id,
+                                "owned_by": model.get("owned_by", ""),
+                            })
+                        logger.info("openrouter_models_count", count=len(models))
+                        return models
+                    except json.JSONDecodeError as e:
+                        logger.error("openrouter_json_parse_error", status_code=response.status_code, error=str(e), response_text=response.text[:200])
+                        return []
                 else:
                     logger.error("openrouter_list_failed", status_code=response.status_code, response_text=response.text[:200])
             
@@ -880,7 +884,7 @@ async def list_models_for_backend(
     Creates a temporary client to fetch models.
     
     Args:
-        backend: Backend type (ollama, lmstudio, openai)
+        backend: Backend type (ollama, lmstudio, openai, openrouter)
         url: Backend URL
         api_key: API key (for OpenAI-compatible backends)
     
@@ -895,6 +899,9 @@ async def list_models_for_backend(
     try:
         models = await temp_client.list_models()
         return models
+    except Exception as e:
+        logger.error("list_models_for_backend_failed", backend=backend, url=url, error=str(e))
+        return []
     finally:
         await temp_client.close()
 

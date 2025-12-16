@@ -3,197 +3,762 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Voice Agent Admin</title>
+  <title>Felix Admin Dashboard</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%236366f1' rx='15' width='100' height='100'/><path fill='white' d='M50 20c5.5 0 10 4.5 10 10v20c0 5.5-4.5 10-10 10s-10-4.5-10-10V30c0-5.5 4.5-10 10-10zm20 30c0 11-9 20-20 20s-20-9-20-20h6c0 7.7 6.3 14 14 14s14-6.3 14-14h6zm-17 28v12h-6v-12h6z'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css?v=19">
   <style>
+    :root {
+      --admin-accent: #8b5cf6;
+      --admin-accent-hover: #7c3aed;
+      --admin-success: #10b981;
+      --admin-danger: #ef4444;
+      --admin-warning: #f59e0b;
+      --admin-bg: #0f0f17;
+      --admin-card: #1a1a2e;
+      --admin-card-hover: #252542;
+      --admin-border: #2d2d44;
+      --admin-text: #e4e4ed;
+      --admin-text-muted: #9999b3;
+    }
+    
+    * { box-sizing: border-box; }
+    
     body {
       margin: 0;
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+      background: var(--admin-bg);
+      color: var(--admin-text);
+      min-height: 100vh;
     }
+    
     .admin-shell {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
-      padding: 24px 20px 32px;
-      display: grid;
-      gap: 16px;
+      padding: 24px 20px 48px;
     }
+    
+    /* Header */
     .admin-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 16px;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--admin-border);
     }
+    
     .admin-title {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 16px;
     }
-    .pill {
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: var(--bg-glass);
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-      font-size: 12px;
+    
+    .admin-title h1 {
+      margin: 0;
+      font-size: 1.75rem;
+      font-weight: 600;
+      background: linear-gradient(135deg, var(--admin-accent), #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
-    .controls {
+    
+    .admin-badge {
+      padding: 6px 12px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, var(--admin-accent), #ec4899);
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .header-actions {
       display: flex;
-      gap: 8px;
+      gap: 12px;
       align-items: center;
     }
-    .controls input {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: var(--text-primary);
-      width: 220px;
+    
+    .header-actions input {
+      background: var(--admin-card);
+      border: 1px solid var(--admin-border);
+      border-radius: 10px;
+      padding: 10px 16px;
+      color: var(--admin-text);
+      font-size: 14px;
+      width: 240px;
+      transition: border-color 0.2s;
     }
-    .controls button {
-      background: var(--accent-primary);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 10px 14px;
-      cursor: pointer;
-      font-weight: 600;
+    
+    .header-actions input:focus {
+      outline: none;
+      border-color: var(--admin-accent);
     }
-    .controls button.secondary {
-      background: var(--bg-glass);
-      color: var(--text-primary);
-      border: 1px solid var(--border-color);
-    }
-    .card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 16px;
-      padding: 16px;
-      box-shadow: var(--shadow-sm);
-    }
-    .grid {
-      display: grid;
-      gap: 12px;
-    }
-    .grid.two {
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    }
-    .stat {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      font-weight: 600;
-    }
-    .stat .label { color: var(--text-secondary); font-size: 14px; }
-    .stat .value { font-size: 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 8px 6px; text-align: left; font-size: 14px; }
-    th { color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border-color); }
-    tr:hover td { background: var(--bg-glass); }
-    .muted { color: var(--text-secondary); font-size: 13px; }
-    .list {
-      display: grid;
-      gap: 8px;
-      max-height: 360px;
-      overflow: auto;
-    }
-    .list-item {
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-    }
-    .list-item .meta {
-      display: flex;
-      gap: 10px;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-    .status-badge {
+    
+    .btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: var(--admin-accent);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: var(--admin-accent-hover);
+      transform: translateY(-1px);
+    }
+    
+    .btn-secondary {
+      background: var(--admin-card);
+      color: var(--admin-text);
+      border: 1px solid var(--admin-border);
+    }
+    
+    .btn-secondary:hover {
+      background: var(--admin-card-hover);
+    }
+    
+    .btn-danger {
+      background: var(--admin-danger);
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+    
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    
+    /* Navigation Tabs */
+    .admin-nav {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      background: var(--admin-card);
+      padding: 6px;
+      border-radius: 14px;
+      width: fit-content;
+    }
+    
+    .nav-tab {
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--admin-text-muted);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .nav-tab:hover {
+      color: var(--admin-text);
+      background: var(--admin-card-hover);
+    }
+    
+    .nav-tab.active {
+      background: var(--admin-accent);
+      color: white;
+    }
+    
+    /* Sections */
+    .admin-section {
+      display: none;
+    }
+    
+    .admin-section.active {
+      display: block;
+    }
+    
+    /* Cards */
+    .card {
+      background: var(--admin-card);
+      border: 1px solid var(--admin-border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    
+    .card-header h2 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    
+    .card-header .badge {
+      padding: 4px 10px;
       border-radius: 12px;
-      background: var(--bg-glass);
-      border: 1px solid var(--border-color);
+      background: var(--admin-card-hover);
+      color: var(--admin-text-muted);
+      font-size: 12px;
+    }
+    
+    /* Grid layouts */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+    
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    
+    /* Stats */
+    .stat-card {
+      background: var(--admin-card);
+      border: 1px solid var(--admin-border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    .stat-label {
+      font-size: 12px;
+      color: var(--admin-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+    
+    .stat-value.success { color: var(--admin-success); }
+    .stat-value.warning { color: var(--admin-warning); }
+    .stat-value.danger { color: var(--admin-danger); }
+    
+    /* Tables */
+    .table-wrap {
+      overflow-x: auto;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 14px;
+      border-bottom: 1px solid var(--admin-border);
+    }
+    
+    th {
+      color: var(--admin-text-muted);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    tr:hover td {
+      background: var(--admin-card-hover);
+    }
+    
+    /* Forms */
+    .form-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    
+    .form-group label {
+      font-size: 12px;
+      color: var(--admin-text-muted);
+      font-weight: 500;
+    }
+    
+    .form-group input,
+    .form-group select {
+      background: var(--admin-bg);
+      border: 1px solid var(--admin-border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--admin-text);
+      font-size: 14px;
+      min-width: 160px;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--admin-accent);
+    }
+    
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    
+    .checkbox-label input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--admin-accent);
+    }
+    
+    /* User list */
+    .user-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--admin-border);
+    }
+    
+    .user-row:last-child {
+      border-bottom: none;
+    }
+    
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--admin-accent), #ec4899);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+      color: white;
+    }
+    
+    .user-details h4 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .user-details p {
+      margin: 2px 0 0;
+      font-size: 12px;
+      color: var(--admin-text-muted);
+    }
+    
+    .user-badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .user-badge.admin {
+      background: rgba(139, 92, 246, 0.2);
+      color: var(--admin-accent);
+    }
+    
+    .user-badge.user {
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--admin-success);
+    }
+    
+    .user-actions {
+      display: flex;
+      gap: 8px;
+    }
+    
+    /* Status indicators */
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    
+    .status-dot.online { background: var(--admin-success); }
+    .status-dot.offline { background: var(--admin-text-muted); }
+    .status-dot.warning { background: var(--admin-warning); }
+    .status-dot.error { background: var(--admin-danger); }
+    
+    /* Messages */
+    .message {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    
+    .message.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--admin-success);
+      border: 1px solid var(--admin-success);
+    }
+    
+    .message.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--admin-danger);
+      border: 1px solid var(--admin-danger);
+    }
+    
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--admin-text-muted);
+    }
+    
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+    
+    /* Scrollable lists */
+    .scrollable-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    
+    /* Log items */
+    .log-item {
+      padding: 12px;
+      background: var(--admin-bg);
+      border-radius: 8px;
+      margin-bottom: 8px;
       font-size: 13px;
     }
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--accent-success);
+    
+    .log-item .meta {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 4px;
+      color: var(--admin-text-muted);
+      font-size: 11px;
     }
-    .danger .status-dot { background: var(--accent-danger); }
-    .warning .status-dot { background: var(--accent-warning); }
-    .error { color: var(--accent-danger); font-weight: 600; }
-    .flex-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-    .nowrap { white-space: nowrap; }
+    
+    .log-item .level {
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    
+    .log-item .level.error { color: var(--admin-danger); }
+    .log-item .level.warning { color: var(--admin-warning); }
+    .log-item .level.info { color: var(--admin-accent); }
+    
+    /* Hidden by default */
+    .hidden { display: none !important; }
+    
+    /* Link back */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--admin-text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      margin-bottom: 20px;
+      transition: color 0.2s;
+    }
+    
+    .back-link:hover {
+      color: var(--admin-text);
+    }
   </style>
 </head>
 <body>
   <main class="admin-shell">
+    <a href="/" class="back-link">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+      </svg>
+      Back to Felix
+    </a>
+    
     <header class="admin-header">
       <div class="admin-title">
-        <div class="pill">Admin</div>
-        <h1 style="margin:0;">Voice Agent Dashboard</h1>
+        <span class="admin-badge">Admin</span>
+        <h1>Felix Dashboard</h1>
       </div>
-      <div class="controls">
-        <input id="tokenInput" type="password" placeholder="X-Admin-Token">
-        <button id="saveToken">Save Token</button>
-        <button id="refresh" class="secondary">Refresh</button>
+      <div class="header-actions">
+        <input id="tokenInput" type="password" placeholder="Enter your login token or admin: felix2024">
+        <button id="saveToken" class="btn btn-primary">Connect</button>
+        <a href="/" class="btn btn-secondary" title="Login on main app to get token">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+          </svg>
+          Login
+        </a>
+        <button id="refresh" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+          Refresh
+        </button>
       </div>
     </header>
-
-    <section class="grid two" id="healthSection">
-      <!-- health cards injected here -->
-    </section>
-
-    <section class="card">
-      <div class="flex-between" style="margin-bottom:10px;">
-        <h2 style="margin:0;">Sessions</h2>
-        <span class="muted" id="sessionCount">0 active</span>
-      </div>
-      <div class="table-wrap" style="overflow:auto;">
-        <table id="sessionsTable">
-          <thead>
-            <tr>
-              <th>Client</th>
-              <th>State</th>
-              <th>Last Activity</th>
-              <th>History</th>
-              <th>Timeout</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="grid two">
-      <div class="card">
-        <div class="flex-between" style="margin-bottom:10px;">
-          <h2 style="margin:0;">Events</h2>
-          <span class="muted" id="eventCount">0</span>
+    
+    <div id="messageArea"></div>
+    
+    <nav class="admin-nav">
+      <button class="nav-tab active" data-section="overview">Overview</button>
+      <button class="nav-tab" data-section="users">Users</button>
+      <button class="nav-tab" data-section="sessions">Sessions</button>
+      <button class="nav-tab" data-section="features">Features</button>
+      <button class="nav-tab" data-section="logs">Logs</button>
+    </nav>
+    
+    <!-- Overview Section -->
+    <section class="admin-section active" id="sectionOverview">
+      <div class="grid-4" id="statsGrid">
+        <div class="stat-card">
+          <span class="stat-label">Status</span>
+          <span class="stat-value success" id="statusValue">—</span>
         </div>
-        <div class="list" id="eventsList"></div>
-      </div>
-      <div class="card">
-        <div class="flex-between" style="margin-bottom:10px;">
-          <h2 style="margin:0;">Logs</h2>
-          <span class="muted" id="logCount">0</span>
+        <div class="stat-card">
+          <span class="stat-label">Active Sessions</span>
+          <span class="stat-value" id="sessionsValue">0</span>
         </div>
-        <div class="list" id="logsList"></div>
+        <div class="stat-card">
+          <span class="stat-label">Users</span>
+          <span class="stat-value" id="usersValue">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Tools</span>
+          <span class="stat-value" id="toolsValue">0</span>
+        </div>
+      </div>
+      
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <h2>Services</h2>
+          </div>
+          <table id="servicesTable">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>STT (Whisper)</td><td id="sttStatus">—</td></tr>
+              <tr><td>LLM (Ollama)</td><td id="llmStatus">—</td></tr>
+              <tr><td>TTS (Piper)</td><td id="ttsStatus">—</td></tr>
+              <tr><td>ComfyUI</td><td id="comfyStatus">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <h2>Recent Events</h2>
+            <span class="badge" id="eventCount">0</span>
+          </div>
+          <div class="scrollable-list" id="eventsList">
+            <div class="empty-state">No events yet</div>
+          </div>
+        </div>
+      </div>
+    </section>
+    
+    <!-- Users Section -->
+    <section class="admin-section" id="sectionUsers">
+      <div class="card">
+        <div class="card-header">
+          <h2>Create New User</h2>
+        </div>
+        <form id="createUserForm" class="form-row">
+          <div class="form-group">
+            <label for="newUsername">Username</label>
+            <input type="text" id="newUsername" placeholder="username" required>
+          </div>
+          <div class="form-group">
+            <label for="newPassword">Password</label>
+            <input type="password" id="newPassword" placeholder="password" required>
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="newIsAdmin">
+              Admin privileges
+            </label>
+          </div>
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </form>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <h2>User Management</h2>
+          <span class="badge" id="userCount">0 users</span>
+        </div>
+        <div id="usersList">
+          <div class="empty-state">Loading users...</div>
+        </div>
+      </div>
+    </section>
+    
+    <!-- Sessions Section -->
+    <section class="admin-section" id="sectionSessions">
+      <div class="card">
+        <div class="card-header">
+          <h2>Active Sessions</h2>
+          <span class="badge" id="sessionCount">0 active</span>
+        </div>
+        <div class="table-wrap">
+          <table id="sessionsTable">
+            <thead>
+              <tr>
+                <th>Client ID</th>
+                <th>User</th>
+                <th>State</th>
+                <th>Last Activity</th>
+                <th>Messages</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    
+    <!-- Features Section -->
+    <section class="admin-section" id="sectionFeatures">
+      <div class="card">
+        <div class="card-header">
+          <h2>Flyout Extensions</h2>
+        </div>
+        <p style="color: var(--admin-text-muted); margin-bottom: 16px;">
+          Manage which flyout panels are available to users. Built-in flyouts cannot be disabled.
+        </p>
+        <div id="flyoutsList">
+          <div class="user-row">
+            <div class="user-info">
+              <div class="user-avatar">H</div>
+              <div class="user-details">
+                <h4>History</h4>
+                <p>Chat history browser</p>
+              </div>
+            </div>
+            <span class="user-badge admin">Built-in</span>
+          </div>
+          <div class="user-row">
+            <div class="user-info">
+              <div class="user-avatar">M</div>
+              <div class="user-details">
+                <h4>Memory</h4>
+                <p>View and manage AI memories</p>
+              </div>
+            </div>
+            <span class="user-badge admin">Built-in</span>
+          </div>
+          <div class="user-row">
+            <div class="user-info">
+              <div class="user-avatar">C</div>
+              <div class="user-details">
+                <h4>Calendar</h4>
+                <p>Schedule and reminders</p>
+              </div>
+            </div>
+            <span class="user-badge admin">Built-in</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="card">
+        <div class="card-header">
+          <h2>Available Extensions</h2>
+        </div>
+        <div id="extensionsList">
+          <div class="user-row">
+            <div class="user-info">
+              <div class="user-avatar" style="background: linear-gradient(135deg, #10b981, #059669);">G</div>
+              <div class="user-details">
+                <h4>Media Gallery</h4>
+                <p>View generated images from ComfyUI</p>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-secondary">Install</button>
+          </div>
+          <div class="user-row">
+            <div class="user-info">
+              <div class="user-avatar" style="background: linear-gradient(135deg, #f59e0b, #d97706);">B</div>
+              <div class="user-details">
+                <h4>Browser</h4>
+                <p>Embedded web browser</p>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-secondary">Install</button>
+          </div>
+          <div class="user-row">
+            <div class="user-info">
+              <div class="user-avatar" style="background: linear-gradient(135deg, #ec4899, #db2777);">V</div>
+              <div class="user-details">
+                <h4>Music Visualizer</h4>
+                <p>MPD music player controls</p>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-secondary">Install</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    
+    <!-- Logs Section -->
+    <section class="admin-section" id="sectionLogs">
+      <div class="card">
+        <div class="card-header">
+          <h2>System Logs</h2>
+          <span class="badge" id="logCount">0</span>
+        </div>
+        <div class="scrollable-list" id="logsList">
+          <div class="empty-state">No logs yet</div>
+        </div>
       </div>
     </section>
   </main>
+  
   <script type="module" src="/static/admin.js"></script>
 </body>
 </html>

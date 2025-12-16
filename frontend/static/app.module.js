@@ -77,9 +77,15 @@ class VoiceAgentApp {
         
         // Setup event listeners
         this.setupEventListeners();
+
+    // Subsystem status lights (Chat / STT / TTS)
+    this.initSubsystemStatus();
         
         // Update UI from settings
         this.updateUIFromSettings();
+        
+        // Check if authentication is required before connecting
+        await this.checkAuthRequired();
         
         // Connect to server
         this.connect();
@@ -91,6 +97,12 @@ class VoiceAgentApp {
             statusDot: document.getElementById('statusDot'),
             statusText: document.getElementById('statusText'),
             modelName: document.getElementById('modelName'),
+
+            // Subsystem status lights (Chat / STT / TTS)
+            statusLights: document.getElementById('statusLights'),
+            lightChat: document.getElementById('lightChat'),
+            lightStt: document.getElementById('lightStt'),
+            lightTts: document.getElementById('lightTts'),
             
             // Main orb
             orb: document.getElementById('orb'),
@@ -118,6 +130,17 @@ class VoiceAgentApp {
             flyoutUrl: document.getElementById('flyoutUrl'),
             flyoutUrlBar: document.getElementById('flyoutUrlBar'),
             
+            // Audio flyout controls (created dynamically)
+            flyoutVolumeSlider: document.getElementById('flyoutVolumeSlider'),
+            flyoutVolumeValue: document.getElementById('flyoutVolumeValue'),
+            flyoutVoiceSpeedSlider: document.getElementById('flyoutVoiceSpeedSlider'),
+            flyoutVoiceSpeedValue: document.getElementById('flyoutVoiceSpeedValue'),
+            flyoutVoiceSelect: document.getElementById('flyoutVoiceSelect'),
+            flyoutTestAudioBtn: document.getElementById('flyoutTestAudioBtn'),
+            flyoutVoiceCloningToggle: document.getElementById('flyoutVoiceCloningToggle'),
+            flyoutCloneReference: document.getElementById('flyoutCloneReference'),
+            flyoutEmotionSelect: document.getElementById('flyoutEmotionSelect'),
+            
             // Settings modal
             settingsModal: document.getElementById('settingsModal'),
             closeSettings: document.getElementById('closeSettings'),
@@ -141,8 +164,12 @@ class VoiceAgentApp {
             openaiUrlSetting: document.getElementById('openaiUrlSetting'),
             openrouterUrlSetting: document.getElementById('openrouterUrlSetting'),
             apiKeySetting: document.getElementById('apiKeySetting'),
+
+            // Backend status
+            testBackendBtn: document.getElementById('testBackendBtn'),
+            backendStatus: document.getElementById('backendStatus'),
             
-            // Volume and speed sliders
+            // Volume and speed sliders (legacy IDs; these are now in the Audio flyout)
             volumeSlider: document.getElementById('volumeSlider'),
             volumeValue: document.getElementById('volumeValue'),
             voiceSpeedSlider: document.getElementById('voiceSpeedSlider'),
@@ -152,7 +179,7 @@ class VoiceAgentApp {
             shortcutsModal: document.getElementById('shortcutsModal'),
             closeShortcuts: document.getElementById('closeShortcuts'),
             
-            // Test audio button
+            // Test audio button (legacy; now in Audio flyout)
             testAudioBtn: document.getElementById('testAudioBtn'),
             
             // Onboarding button
@@ -171,6 +198,16 @@ class VoiceAgentApp {
             historyList: document.getElementById('historyList'),
             exportHistory: document.getElementById('exportHistory'),
             clearHistoryBtn: document.getElementById('clearHistory'),
+            
+            // Login modal
+            loginModal: document.getElementById('loginModal'),
+            loginForm: document.getElementById('loginForm'),
+            loginUsername: document.getElementById('loginUsername'),
+            loginPassword: document.getElementById('loginPassword'),
+            loginSubmit: document.getElementById('loginSubmit'),
+            loginRegister: document.getElementById('loginRegister'),
+            loginCancel: document.getElementById('loginCancel'),
+            loginError: document.getElementById('loginError'),
         };
     }
     
@@ -214,8 +251,8 @@ class VoiceAgentApp {
             }
         });
         
-        // Test audio button
-        this.elements.testAudioBtn?.addEventListener('click', () => this.testAudio());
+    // Test audio button (legacy; now in flyout)
+    this.elements.testAudioBtn?.addEventListener('click', () => this.testAudio());
         
         // Onboarding button
         this.elements.startOnboardingBtn?.addEventListener('click', () => {
@@ -249,7 +286,7 @@ class VoiceAgentApp {
             }
         });
         
-        // Volume slider
+        // Volume slider (legacy; now in flyout)
         this.elements.volumeSlider?.addEventListener('input', (e) => {
             const value = e.target.value;
             if (this.elements.volumeValue) {
@@ -259,7 +296,7 @@ class VoiceAgentApp {
             this.audioHandler.setVolume(value / 100);
         });
         
-        // Voice speed slider
+        // Voice speed slider (legacy; now in flyout)
         this.elements.voiceSpeedSlider?.addEventListener('input', (e) => {
             const value = e.target.value;
             const speed = (value / 100).toFixed(1);
@@ -272,6 +309,12 @@ class VoiceAgentApp {
         this.elements.backendSelect?.addEventListener('change', (e) => {
             this.updateBackendVisibility(e.target.value);
             this.fetchModels(e.target.value);
+            this.updateBackendStatusUI({ state: 'idle' });
+        });
+
+        // Backend health test
+        this.elements.testBackendBtn?.addEventListener('click', () => {
+            this.testBackendConnection();
         });
         
         // Refresh models button
@@ -310,6 +353,14 @@ class VoiceAgentApp {
         // History flyout buttons
         this.elements.exportHistory?.addEventListener('click', () => this.exportConversationHistory());
         this.elements.clearHistoryBtn?.addEventListener('click', () => this.clearConversationHistory());
+        
+        // Login modal
+        this.elements.loginCancel?.addEventListener('click', () => this.closeLoginModal());
+        this.elements.loginForm?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.handleLogin();
+        });
+        this.elements.loginRegister?.addEventListener('click', () => this.handleRegister());
         
         // Audio callbacks
         this.audioHandler.onAudioData = (pcmData) => this.sendAudio(pcmData);
@@ -372,6 +423,7 @@ class VoiceAgentApp {
     updateUIFromSettings() {
         const settings = getAllSettings();
         
+        // Voice select moved into flyout; keep legacy if present
         if (this.elements.voiceSelect) {
             this.elements.voiceSelect.value = settings.voice;
         }
@@ -413,8 +465,11 @@ class VoiceAgentApp {
         // Store the current model to restore after fetch
         this._pendingModel = settings.model;
         this.fetchModels(settings.llmBackend || 'ollama');
+
+    // Backend status (reset on settings load)
+    this.updateBackendStatusUI({ state: 'idle' });
         
-        // Volume slider
+        // Volume slider (legacy)
         if (this.elements.volumeSlider) {
             this.elements.volumeSlider.value = settings.volume;
         }
@@ -422,13 +477,16 @@ class VoiceAgentApp {
             this.elements.volumeValue.textContent = `${settings.volume}%`;
         }
         
-        // Voice speed slider
+        // Voice speed slider (legacy)
         if (this.elements.voiceSpeedSlider) {
             this.elements.voiceSpeedSlider.value = settings.voiceSpeed;
         }
         if (this.elements.voiceSpeedValue) {
             this.elements.voiceSpeedValue.textContent = `${(settings.voiceSpeed / 100).toFixed(1)}x`;
         }
+
+        // Audio flyout controls (if currently rendered)
+        this.refreshAudioFlyoutUIFromSettings();
         
         // Apply volume to audio handler
         this.audioHandler.setVolume(settings.volume / 100);
@@ -438,6 +496,150 @@ class VoiceAgentApp {
             this.elements.conversation?.classList.add('show-timestamps');
         } else {
             this.elements.conversation?.classList.remove('show-timestamps');
+        }
+    }
+
+    updateBackendStatusUI({ state, message } = {}) {
+        const el = this.elements.backendStatus;
+        if (!el) return;
+
+        el.classList.remove('ok', 'bad');
+
+        if (state === 'checking') {
+            el.textContent = 'Checking…';
+            return;
+        }
+
+        if (state === 'ok') {
+            el.classList.add('ok');
+            el.textContent = message || 'OK';
+            return;
+        }
+
+        if (state === 'bad') {
+            el.classList.add('bad');
+            el.textContent = message || 'Failed';
+            return;
+        }
+
+        el.textContent = message || 'Not checked';
+    }
+
+    // ========================================
+    // Subsystem Status Lights (Chat / STT / TTS)
+    // ========================================
+
+    initSubsystemStatus() {
+        // override values: null | 'good' | 'warn' | 'bad' | 'off'
+        const settings = getAllSettings();
+        this.subsystemStatus = {
+            derived: { chat: 'warn', stt: 'warn', tts: 'warn' },
+            override: {
+                chat: settings?.statusOverrideChat ?? null,
+                stt: settings?.statusOverrideStt ?? null,
+                tts: settings?.statusOverrideTts ?? null,
+            },
+        };
+
+        const cycle = (current) => {
+            const order = [null, 'good', 'warn', 'bad', 'off'];
+            const idx = order.indexOf(current);
+            return order[(idx + 1) % order.length];
+        };
+
+        const onClick = (subsystem) => {
+            const next = cycle(this.subsystemStatus.override[subsystem]);
+            this.subsystemStatus.override[subsystem] = next;
+
+            saveSettings({
+                statusOverrideChat: this.subsystemStatus.override.chat,
+                statusOverrideStt: this.subsystemStatus.override.stt,
+                statusOverrideTts: this.subsystemStatus.override.tts,
+            });
+
+            this.renderSubsystemLights();
+        };
+
+        this.elements.lightChat?.addEventListener('click', () => onClick('chat'));
+        this.elements.lightStt?.addEventListener('click', () => onClick('stt'));
+        this.elements.lightTts?.addEventListener('click', () => onClick('tts'));
+
+        // Initialize default derived values
+        this.updateSubsystemDerivedStatus({
+            chat: this.isConnected ? 'good' : 'warn',
+            stt: 'good',
+            tts: 'good',
+        });
+        this.renderSubsystemLights();
+    }
+
+    updateSubsystemDerivedStatus(partial) {
+        if (!this.subsystemStatus) return;
+        this.subsystemStatus.derived = { ...this.subsystemStatus.derived, ...partial };
+        this.renderSubsystemLights();
+    }
+
+    _applyLightClass(el, level, isOverride) {
+        if (!el) return;
+        el.classList.remove('good', 'warn', 'bad', 'off', 'override');
+        if (level) el.classList.add(level);
+        if (isOverride) el.classList.add('override');
+    }
+
+    renderSubsystemLights() {
+        if (!this.subsystemStatus) return;
+        const pick = (k) => this.subsystemStatus.override[k] ?? this.subsystemStatus.derived[k];
+
+        this._applyLightClass(this.elements.lightChat, pick('chat'), this.subsystemStatus.override.chat != null);
+        this._applyLightClass(this.elements.lightStt, pick('stt'), this.subsystemStatus.override.stt != null);
+        this._applyLightClass(this.elements.lightTts, pick('tts'), this.subsystemStatus.override.tts != null);
+    }
+
+    async testBackendConnection() {
+        const backend = this.elements.backendSelect?.value || 'ollama';
+
+        let url = '';
+        let apiKey = '';
+        switch (backend) {
+            case 'ollama':
+                url = this.elements.ollamaUrl?.value || 'http://localhost:11434';
+                break;
+            case 'lmstudio':
+                url = this.elements.lmstudioUrl?.value || 'http://localhost:1234';
+                break;
+            case 'openai':
+                url = this.elements.openaiUrl?.value || 'https://api.openai.com';
+                apiKey = this.elements.apiKeyInput?.value || '';
+                break;
+            case 'openrouter':
+                url = this.elements.openrouterUrl?.value || 'https://openrouter.ai/api/v1';
+                apiKey = this.elements.apiKeyInput?.value || '';
+                break;
+        }
+
+        const btn = this.elements.testBackendBtn;
+        if (btn) {
+            btn.disabled = true;
+        }
+        this.updateBackendStatusUI({ state: 'checking' });
+
+        try {
+            const params = new URLSearchParams({ backend, url });
+            if (apiKey) params.append('api_key', apiKey);
+
+            const res = await fetch(`/api/models?${params.toString()}`);
+            const data = await res.json();
+            if (!res.ok || data?.error) {
+                throw new Error(data?.error || `HTTP ${res.status}`);
+            }
+            const count = Array.isArray(data?.models) ? data.models.length : 0;
+            this.updateBackendStatusUI({ state: 'ok', message: `OK (${count} models)` });
+        } catch (e) {
+            this.updateBackendStatusUI({ state: 'bad', message: `Failed: ${e?.message || e}` });
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+            }
         }
     }
     
@@ -581,13 +783,17 @@ class VoiceAgentApp {
     }
     
     handleSaveSettings() {
+        const voiceEl = this.elements.voiceSelect || this.elements.flyoutVoiceSelect;
+        const volumeEl = this.elements.volumeSlider || this.elements.flyoutVolumeSlider;
+        const voiceSpeedEl = this.elements.voiceSpeedSlider || this.elements.flyoutVoiceSpeedSlider;
+
         const newSettings = {
-            voice: this.elements.voiceSelect?.value,
+            voice: voiceEl?.value,
             model: this.elements.modelSelect?.value,
             autoListen: this.elements.autoListen?.checked,
             showTimestamps: this.elements.showTimestamps?.checked,
-            volume: parseInt(this.elements.volumeSlider?.value || 80),
-            voiceSpeed: parseInt(this.elements.voiceSpeedSlider?.value || 100),
+            volume: parseInt(volumeEl?.value || 80),
+            voiceSpeed: parseInt(voiceSpeedEl?.value || 100),
             // Backend settings
             llmBackend: this.elements.backendSelect?.value || 'ollama',
             ollamaUrl: this.elements.ollamaUrl?.value || 'http://localhost:11434',
@@ -636,9 +842,21 @@ class VoiceAgentApp {
     
     connect() {
         this.updateStatus('connecting', 'Connecting...');
+
+        // Chat/LLM depends on server reachability
+        this.updateSubsystemDerivedStatus({ chat: 'warn' });
         
         try {
-            this.ws = new WebSocket(this.wsUrl);
+            // Get auth token from localStorage if available
+            const authToken = localStorage.getItem('felixAuthToken');
+            
+            // Add token to WebSocket URL as query parameter
+            const url = new URL(this.wsUrl);
+            if (authToken) {
+                url.searchParams.append('token', authToken);
+            }
+            
+            this.ws = new WebSocket(url.toString());
             this.ws.binaryType = 'arraybuffer';  // Ensure binary data is sent/received as ArrayBuffer
             
             this.ws.onopen = () => {
@@ -646,6 +864,8 @@ class VoiceAgentApp {
                 this.reconnectAttempts = 0;
                 this.reconnectDelay = 1000;
                 this.updateStatus('connected', 'Ready');
+
+                this.updateSubsystemDerivedStatus({ chat: 'good' });
                 
                 // Reset audio state on connect/reconnect to prevent stale isPlaying flag
                 console.log('[Felix] WebSocket connected, resetting audio state. isPlaying was:', this.audioHandler.isPlaying);
@@ -675,12 +895,14 @@ class VoiceAgentApp {
                 this.isConnected = false;
                 this.updateStatus('disconnected', 'Disconnected');
                 this.stopListening();
+                this.updateSubsystemDerivedStatus({ chat: 'bad' });
                 this.scheduleReconnect();
             };
             
             this.ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
                 this.updateStatus('error', 'Connection error');
+                this.updateSubsystemDerivedStatus({ chat: 'bad' });
             };
             
             this.ws.onmessage = (event) => this.handleWsMessage(event);
@@ -784,6 +1006,7 @@ class VoiceAgentApp {
         switch (state) {
             case 'idle':
                 this.updateStatus('connected', 'Ready');
+                this.updateSubsystemDerivedStatus({ stt: 'good', tts: 'good' });
                 // Restore music volume when returning to idle
                 if (isMusicPlaying()) {
                     restoreVolume();
@@ -796,17 +1019,20 @@ class VoiceAgentApp {
                 this.updateStatus('listening', 'Listening...');
                 orb?.classList.add('active');
                 setAvatarState(AVATAR_STATES.LISTENING);
+                this.updateSubsystemDerivedStatus({ stt: 'good' });
                 break;
             case 'processing':
                 this.updateStatus('processing', 'Thinking...');
                 orb?.classList.add('processing');
                 setAvatarState(AVATAR_STATES.THINKING);
+                this.updateSubsystemDerivedStatus({ stt: 'good' });
                 // Keep recording for seamless barge-in transition
                 break;
             case 'speaking':
                 this.updateStatus('speaking', 'Speaking...');
                 orb?.classList.add('speaking');
                 setAvatarState(AVATAR_STATES.SPEAKING);
+                this.updateSubsystemDerivedStatus({ tts: 'good' });
                 // Duck music volume when Felix speaks
                 if (isMusicPlaying()) {
                     duckVolume(20);  // Duck to 20%
@@ -825,6 +1051,7 @@ class VoiceAgentApp {
                 this.audioHandler.stopPlayback();
                 orb?.classList.add('active');
                 setInterrupted();
+                this.updateSubsystemDerivedStatus({ stt: 'good', tts: 'warn' });
                 // Restore music volume on interrupt
                 if (isMusicPlaying()) {
                     restoreVolume();
@@ -863,6 +1090,7 @@ class VoiceAgentApp {
             console.log('[Felix] Starting audio recording...');
             await this.audioHandler.startRecording();
             this.isListening = true;
+            this.updateSubsystemDerivedStatus({ stt: 'good' });
             
             this.elements.orb?.classList.add('active');
             console.log('[Felix] Sending start_listening to server');
@@ -871,6 +1099,7 @@ class VoiceAgentApp {
         } catch (error) {
             console.error('Failed to start listening:', error);
             showError('Could not access microphone. Make sure you\'re using localhost.');
+            this.updateSubsystemDerivedStatus({ stt: 'bad' });
         }
     }
     
@@ -1467,6 +1696,7 @@ class VoiceAgentApp {
             code: { title: 'Code Editor', icon: 'code', showUrlBar: false },
             terminal: { title: 'Terminal', icon: 'terminal', showUrlBar: false },
             preview: { title: 'Preview', icon: 'preview', showUrlBar: true },
+            audio: { title: 'Audio', icon: 'audio', showUrlBar: false },
             history: { title: 'Conversation History', icon: 'history', showUrlBar: false },
         };
         
@@ -1532,6 +1762,137 @@ class VoiceAgentApp {
                     this.renderHistoryPanel();
                 }
                 break;
+
+            case 'audio':
+                this.renderAudioFlyout();
+                break;
+        }
+    }
+
+    renderAudioFlyout() {
+        const content = this.elements.flyoutContent;
+        if (!content) return;
+
+        content.innerHTML = `
+            <div class="flyout-audio" id="flyoutAudio">
+                <div class="flyout-section">
+                    <h3>Playback</h3>
+
+                    <div class="setting">
+                        <label for="flyoutVolumeSlider">
+                            <span>Speaker Volume</span>
+                            <span class="setting-value" id="flyoutVolumeValue">80%</span>
+                        </label>
+                        <input type="range" id="flyoutVolumeSlider" min="0" max="100" value="80" class="slider">
+                    </div>
+
+                    <div class="setting">
+                        <label for="flyoutVoiceSpeedSlider">
+                            <span>Voice Speed</span>
+                            <span class="setting-value" id="flyoutVoiceSpeedValue">1.0x</span>
+                        </label>
+                        <input type="range" id="flyoutVoiceSpeedSlider" min="50" max="200" value="100" class="slider">
+                    </div>
+
+                    <button class="btn btn-secondary test-audio-btn" id="flyoutTestAudioBtn">🔊 Test Audio</button>
+                </div>
+
+                <div class="flyout-section">
+                    <h3>Voice</h3>
+                    <div class="setting">
+                        <label for="flyoutVoiceSelect">Voice</label>
+                        <select id="flyoutVoiceSelect">
+                            <option value="amy">Amy (Female, Natural)</option>
+                            <option value="lessac">Lessac (Female, Expressive)</option>
+                            <option value="ryan">Ryan (Male, High Quality)</option>
+                        </select>
+                    </div>
+
+                    <div class="setting">
+                        <label for="flyoutEmotionSelect">Emotion</label>
+                        <select id="flyoutEmotionSelect" disabled>
+                            <option value="neutral">Neutral</option>
+                            <option value="happy">Happy</option>
+                            <option value="sad">Sad</option>
+                            <option value="angry">Angry</option>
+                            <option value="excited">Excited</option>
+                        </select>
+                        <p class="setting-hint">Emotion is coming soon (backend support needed).</p>
+                    </div>
+                </div>
+
+                <div class="flyout-section">
+                    <h3>Voice Cloning</h3>
+                    <div class="setting">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="flyoutVoiceCloningToggle" disabled>
+                            Enable voice cloning
+                        </label>
+                        <p class="setting-hint">Voice cloning is coming soon (backend support needed).</p>
+                    </div>
+                    <div class="setting">
+                        <label for="flyoutCloneReference">Reference audio / profile</label>
+                        <input type="text" id="flyoutCloneReference" placeholder="(future) /path/to/reference.wav or profile id" disabled>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Re-cache dynamic elements
+        this.elements.flyoutVolumeSlider = document.getElementById('flyoutVolumeSlider');
+        this.elements.flyoutVolumeValue = document.getElementById('flyoutVolumeValue');
+        this.elements.flyoutVoiceSpeedSlider = document.getElementById('flyoutVoiceSpeedSlider');
+        this.elements.flyoutVoiceSpeedValue = document.getElementById('flyoutVoiceSpeedValue');
+        this.elements.flyoutVoiceSelect = document.getElementById('flyoutVoiceSelect');
+        this.elements.flyoutTestAudioBtn = document.getElementById('flyoutTestAudioBtn');
+        this.elements.flyoutVoiceCloningToggle = document.getElementById('flyoutVoiceCloningToggle');
+        this.elements.flyoutCloneReference = document.getElementById('flyoutCloneReference');
+        this.elements.flyoutEmotionSelect = document.getElementById('flyoutEmotionSelect');
+
+        // Wire listeners
+        this.elements.flyoutTestAudioBtn?.addEventListener('click', () => this.testAudio());
+
+        this.elements.flyoutVolumeSlider?.addEventListener('input', (e) => {
+            const value = e.target.value;
+            if (this.elements.flyoutVolumeValue) {
+                this.elements.flyoutVolumeValue.textContent = `${value}%`;
+            }
+            this.audioHandler.setVolume(value / 100);
+        });
+
+        this.elements.flyoutVoiceSpeedSlider?.addEventListener('input', (e) => {
+            const value = e.target.value;
+            const speed = (value / 100).toFixed(1);
+            if (this.elements.flyoutVoiceSpeedValue) {
+                this.elements.flyoutVoiceSpeedValue.textContent = `${speed}x`;
+            }
+        });
+
+        // Persist on change (same as settings modal concept, but immediate)
+        this.elements.flyoutVoiceSelect?.addEventListener('change', () => this.handleSaveSettings());
+        this.elements.flyoutVolumeSlider?.addEventListener('change', () => this.handleSaveSettings());
+        this.elements.flyoutVoiceSpeedSlider?.addEventListener('change', () => this.handleSaveSettings());
+
+        this.refreshAudioFlyoutUIFromSettings();
+    }
+
+    refreshAudioFlyoutUIFromSettings() {
+        const settings = getAllSettings();
+
+        if (this.elements.flyoutVoiceSelect) {
+            this.elements.flyoutVoiceSelect.value = settings.voice;
+        }
+        if (this.elements.flyoutVolumeSlider) {
+            this.elements.flyoutVolumeSlider.value = settings.volume;
+        }
+        if (this.elements.flyoutVolumeValue) {
+            this.elements.flyoutVolumeValue.textContent = `${settings.volume}%`;
+        }
+        if (this.elements.flyoutVoiceSpeedSlider) {
+            this.elements.flyoutVoiceSpeedSlider.value = settings.voiceSpeed;
+        }
+        if (this.elements.flyoutVoiceSpeedValue) {
+            this.elements.flyoutVoiceSpeedValue.textContent = `${(settings.voiceSpeed / 100).toFixed(1)}x`;
         }
     }
     
@@ -1771,6 +2132,9 @@ class VoiceAgentApp {
         
         // Mute/unmute TTS audio
         this.audioHandler.setMuted?.(this.isMuted);
+
+        // If muted, user won't hear TTS
+        this.updateSubsystemDerivedStatus({ tts: this.isMuted ? 'warn' : 'good' });
         
         showInfo(this.isMuted ? 'Audio muted' : 'Audio unmuted', { duration: 1500 });
     }
@@ -1851,6 +2215,132 @@ class VoiceAgentApp {
         this.conversationHistory = [];
         this.renderHistoryPanel();
         showInfo('History cleared');
+    }
+    
+    // ========================================
+    // Authentication
+    // ========================================
+    
+    async checkAuthRequired() {
+        try {
+            const response = await fetch('/api/auth/user');
+            
+            if (response.status === 401) {
+                // Authentication is required but no token provided
+                this.showLoginModal();
+                return false;
+            }
+            
+            const data = await response.json();
+            
+            if (data.auth_enabled && !data.user) {
+                // Authentication is enabled but no user is logged in
+                this.showLoginModal();
+                return false;
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('Error checking auth:', error);
+            return true; // Continue if auth check fails
+        }
+    }
+    
+    showLoginModal() {
+        if (this.elements.loginModal) {
+            this.elements.loginModal.classList.add('visible');
+            this.elements.loginError.textContent = '';
+            this.elements.loginUsername.value = '';
+            this.elements.loginPassword.value = '';
+        }
+    }
+    
+    closeLoginModal() {
+        if (this.elements.loginModal) {
+            this.elements.loginModal.classList.remove('visible');
+        }
+    }
+    
+    async handleLogin() {
+        const username = this.elements.loginUsername?.value;
+        const password = this.elements.loginPassword?.value;
+        
+        if (!username || !password) {
+            this.showLoginError('Please enter both username and password');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username, password }),
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                this.showLoginError(data.detail || 'Login failed');
+                return;
+            }
+            
+            // Store token
+            localStorage.setItem('felixAuthToken', data.access_token);
+            
+            // Close modal and connect
+            this.closeLoginModal();
+            this.connect();
+            
+        } catch (error) {
+            console.error('Login error:', error);
+            this.showLoginError('Network error. Please try again.');
+        }
+    }
+    
+    async handleRegister() {
+        const username = this.elements.loginUsername?.value;
+        const password = this.elements.loginPassword?.value;
+        
+        if (!username || !password) {
+            this.showLoginError('Please enter both username and password');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username, password }),
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                this.showLoginError(data.detail || 'Registration failed');
+                return;
+            }
+            
+            // Store token
+            localStorage.setItem('felixAuthToken', data.access_token);
+            
+            // Close modal and connect
+            this.closeLoginModal();
+            this.connect();
+            
+        } catch (error) {
+            console.error('Registration error:', error);
+            this.showLoginError('Network error. Please try again.');
+        }
+    }
+    
+    showLoginError(message) {
+        if (this.elements.loginError) {
+            this.elements.loginError.textContent = message;
+        }
     }
 }
 
