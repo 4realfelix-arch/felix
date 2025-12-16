@@ -49,3 +49,7 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Review staging area (keep README tracked)
+review/**
+!review/README.md
