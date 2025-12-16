@@ -4,7 +4,7 @@ This document describes the technical architecture of the Voice Agent system.
 
 ## System Overview
 
-Voice Agent is a real-time conversational AI assistant with barge-in (interrupt) support. The system is designed for local execution on AMD MI50 GPUs via ROCm, with no cloud dependencies.
+Voice Agent is a real-time conversational AI assistant with barge-in (interrupt) support. The system is designed for local execution on CPU, with optional GPU acceleration on NVIDIA (CUDA) or AMD (ROCm/HIP) depending on the selected backend.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -33,8 +33,8 @@ Voice Agent is a real-time conversational AI assistant with barge-in (interrupt)
 │  ┌─────┐   ┌──────────┐  ┌──────────┐   ┌─────────┐          │         │
 │  │ VAD │   │   STT    │  │   LLM    │   │   TTS   │          │         │
 │  │     │   │          │  │          │   │         │          │         │
-│  │Silero│   │whisper.cpp│  │ Ollama   │   │ Piper   │          │         │
-│  │ CPU  │   │ MI50 #1  │  │ MI50 #2  │   │  CPU    │          │         │
+│  │Silero│   │faster-whisper│  │ Ollama   │   │ Piper   │          │         │
+│  │ CPU  │   │ GPU/CPU  │  │ GPU/CPU  │   │  CPU    │          │         │
 │  └──┬──┘   └────┬─────┘  └────┬─────┘   └────┬────┘          │         │
 │     │           │             │              │                │         │
 │     └───────────┴─────────────┴──────────────┴────────────────┘         │
@@ -114,18 +114,14 @@ FastAPI async server with WebSocket support.
 
 ### 4. Speech-to-Text
 
-**`server/stt/whisper_cpp.py`** - Whisper integration:
-- Subprocess wrapper for whisper.cpp CLI
-- Built with `GGML_HIP=1` for ROCm/MI50 support
-- Model: `ggml-large-v3-turbo.bin`
-- Writes temp WAV file, runs CLI, parses output
+**`server/stt/whisper.py`** - Whisper integration:
+- Uses `faster-whisper` (CTranslate2) for low-latency transcription
+- STT backend and runtime are controlled by env/settings (see `server/config.py`): `STT_BACKEND`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, `WHISPER_MODEL`
 
 ```python
-# Whisper CLI invocation
-whisper.cpp/build/bin/whisper-cli \
-    -m models/ggml-large-v3-turbo.bin \
-    -f /tmp/audio.wav \
-    --gpu-device 1  # MI50 GPU index
+# Typical call path
+stt = await get_stt()
+text = await stt.transcribe(audio_pcm16_bytes)
 ```
 
 ### 5. Language Model
@@ -170,10 +166,10 @@ piper/piper/piper \
 - Result formatting for LLM
 
 **Built-in Tools** (`server/tools/builtin/`):
-- `datetime.py` - Time, date, calculations
-- `weather.py` - Open-Meteo API integration
-- `web.py` - DuckDuckGo search, URL opening
-- `system.py` - System info, resource usage
+- `datetime_tools.py` - Time, date, calculations
+- `weather_tools.py` - Open-Meteo API integration
+- `web_tools.py` - DuckDuckGo search, URL opening
+- `system_tools.py` - System info, resource usage
 
 ## Data Flow
 
@@ -192,7 +188,7 @@ piper/piper/piper \
    │                If silence >800ms → state = PROCESSING
    │
 5. STT transcribes buffered audio
-   │                whisper.cpp on MI50 GPU
+   │                STT backend (depends on `STT_BACKEND`)
    │
 6. LLM generates response
    │                Ollama with streaming
@@ -284,15 +280,10 @@ Server → Client:
 | Component | Hardware | Notes |
 |-----------|----------|-------|
 | VAD (Silero) | CPU | Lightweight, <10ms per chunk |
-| STT (whisper.cpp) | MI50 GPU #1 | ROCm/HIP, `--gpu-device 1` |
-| LLM (Ollama) | MI50 GPU #2 | ROCm, separate from STT |
+| STT | GPU/CPU | Controlled by `STT_BACKEND` and (for faster-whisper) `WHISPER_DEVICE` |
+| LLM (Ollama) | GPU/CPU | Runs as a separate local service (default `http://localhost:11434`) |
 | TTS (Piper) | CPU | Fast ONNX runtime, ~50ms |
 | WebSocket Server | CPU | Async I/O, minimal overhead |
-
-**GPU Device Mapping:**
-- Device 0: AMD RX 6600 (display)
-- Device 1: AMD MI50 #1 (STT)
-- Device 2: AMD MI50 #2 (LLM via Ollama)
 
 ## Security Considerations
 
@@ -313,6 +304,50 @@ Server → Client:
 | End-to-end response | 2-4s |
 
 ## Extensibility
+
+### Extensions: Tools + Flyouts
+
+The “extension” model is split into two cooperating parts:
+
+- **Tools (backend modules):** Python functions registered in the tool registry (`server/tools/registry.py`). A tool can be enabled/disabled like a plugin and can return plain text or structured UI output.
+- **Flyouts (frontend extension surfaces):** stable UI panels (browser/code/terminal) that act like extension points. Tools can optionally render into a flyout by returning a `flyout` payload; the frontend hosts and renders it.
+
+Think of it like a VS Code extension API: the core app provides a small, stable surface area (tool calling + flyout hosts), and modules plug into it.
+
+**Current implementation (today):**
+- Tools are registered by importing modules under `server/tools/builtin/` (see `server/tools/builtin/__init__.py`).
+- A tool result may include a flyout instruction that the server forwards to the client, e.g.:
+
+```json
+{
+   "text": "Opening the page",
+   "flyout": {"type": "browser", "content": "https://example.com"}
+}
+```
+
+**Target setup (user-shareable modules):**
+- A **Tool Pack** is a folder you can drop in (or zip/share) that contains:
+   - a small **manifest** (metadata + what it provides)
+   - one or more Python modules that register tools
+   - optional frontend assets/config (if needed)
+- The app loads only **enabled** packs (toggle on/off), so the UI feels like “turning extensions on/off”.
+
+Example manifest (shape, not yet enforced by code):
+
+```json
+{
+   "id": "felix.browser_tools",
+   "name": "Browser Tools",
+   "version": "0.1.0",
+   "description": "Open URLs and show results in a flyout",
+   "backend": {"python_module": "server.tools.packs.browser_tools"},
+   "tools": ["open_url"],
+   "flyouts": ["browser"],
+   "optional_deps": []
+}
+```
+
+Enable/disable can be modeled as a config list of pack IDs: only those IDs are imported/registered and exposed to the LLM.
 
 ### Adding New Tools
 
@@ -345,3 +380,4 @@ The architecture supports swapping components:
 ---
 
 *Last updated: November 27, 2025*
+we 

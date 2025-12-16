@@ -22,7 +22,7 @@ class SileroVAD:
         sample_rate: int = 16000,
         min_speech_ms: int = 150,
         min_silence_ms: int = 300,
-        device: str = "cuda",
+        device: str = "auto",
         use_onnx: bool = False,
     ):
         """
@@ -43,7 +43,7 @@ class SileroVAD:
         self.min_speech_samples = int(sample_rate * min_speech_ms / 1000)
         self.min_silence_samples = int(sample_rate * min_silence_ms / 1000)
         
-        # Load Silero VAD model - default to TorchScript for CUDA acceleration
+        # Load Silero VAD model - default to TorchScript for GPU acceleration when available
         self.model, self.utils = torch.hub.load(
             repo_or_dir='snakers4/silero-vad',
             model='silero_vad',

@@ -8,6 +8,11 @@ from .executor import tool_executor, execute_tool, ToolResult
 # Import builtin tools to register them
 from . import builtin
 
+# Import enabled tool packs (extension-style modules)
+from .packs import load_enabled_tool_packs
+
+load_enabled_tool_packs()
+
 __all__ = [
     "tool_registry",
     "Tool",

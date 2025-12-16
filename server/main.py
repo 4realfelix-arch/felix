@@ -1,6 +1,6 @@
 """
 Main FastAPI server for Voice Agent.
-Production-ready with AMD MI50 GPU acceleration.
+Runs on CPU by default; can use GPU acceleration when available.
 """
 import asyncio
 import json
@@ -17,7 +17,7 @@ import structlog
 from .config import settings
 from .session import Session, SessionState
 from .audio.vad import create_vad, SileroVAD
-from .stt.whisper import get_stt  # faster-whisper with CUDA
+from .stt import get_stt, get_active_stt_backend
 from .llm.ollama import get_llm_client, list_models_for_backend
 from .tts.piper_tts import get_tts, list_voices  # Piper local TTS
 from .tools import tool_registry, tool_executor
@@ -48,8 +48,8 @@ async def lifespan(app: FastAPI):
     """Application lifecycle management."""
     logger.info("Starting Voice Agent server...")
     
-    # Initialize STT (faster-whisper with CUDA)
-    logger.info("Loading Whisper model on CUDA GPU...")
+    # Initialize STT
+    logger.info("Loading Whisper model...", device=settings.whisper_device)
     await get_stt()
     logger.info("Whisper ready", model=settings.whisper_model)
     
@@ -124,8 +124,8 @@ async def service_worker():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    stt_backend = "faster-whisper"
-    if settings.whisper_device:
+    stt_backend = get_active_stt_backend() or settings.stt_backend
+    if stt_backend == "faster-whisper" and settings.whisper_device:
         device_label = settings.whisper_device.upper()
         if settings.whisper_device == "cuda":
             device_label = f"CUDA (GPU {settings.whisper_gpu_device})"

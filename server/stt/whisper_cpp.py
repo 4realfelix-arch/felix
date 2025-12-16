@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 import structlog
 
-from server.config import settings
+from ..config import settings
 
 logger = structlog.get_logger()
 

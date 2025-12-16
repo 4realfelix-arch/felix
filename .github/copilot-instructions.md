@@ -2,13 +2,13 @@
 
 ## Architecture Overview
 
-Real-time voice assistant with barge-in (interrupt) support, running fully locally on AMD MI50 GPUs via ROCm:
+Real-time voice assistant with barge-in (interrupt) support, designed to run locally:
 
 ```
 Browser (Vanilla JS) ←→ WebSocket ←→ FastAPI Server
                                        ├── VAD (Silero, CPU)
-                                       ├── STT (whisper.cpp, MI50 GPU #1)
-                                       ├── LLM (Ollama, MI50 GPU #2)
+                                       ├── STT (faster-whisper)
+                                       ├── LLM (Ollama or OpenAI-compatible)
                                        ├── TTS (Piper, CPU)
                                        └── Tools (async execution)
 ```
@@ -32,7 +32,7 @@ Browser (Vanilla JS) ←→ WebSocket ←→ FastAPI Server
 | `frontend/static/app.module.js` | Main app class, WebSocket client |
 | `frontend/static/audio.module.js` | `AudioHandler` class, mic/playback |
 | `frontend/static/settings.js` | LocalStorage persistence |
-| `frontend/static/theme.js` | 9 themes, CSS variable switching |
+| `frontend/static/theme.js` | Theme switching + palette helpers |
 | `frontend/static/avatar.js` | Animated avatar states |
 
 ## Code Patterns
@@ -69,8 +69,7 @@ initTheme();
 initAvatar(document.getElementById('avatar'));
 ```
 - **No build step** - Vanilla JS with ES6 modules
-- **CSS variables only** - Never hardcode colors: `var(--text-primary)`
-- Themes in `style.css` as `[data-theme="name"]` selectors
+- Themes are applied via `[data-theme="name"]` selectors (see `frontend/static/style.css`) and helpers in `frontend/static/theme.js`.
 
 ### Logging (Python)
 ```python
@@ -88,12 +87,14 @@ with start_stt_span(len(audio_bytes)) as span:
 ```
 Spans: `voice.pipeline`, `stt.transcribe`, `llm.generate`, `tool.<name>`, `tts.synthesize`
 
+Note: Tracing is optional; if `opentelemetry` isn't installed, the tracer is a no-op.
+
 ## Running & Testing
 
 ```bash
 ./run.sh              # Start server (auto-activates venv, checks Ollama)
 ./launch.sh           # Launch with Chrome app window
-python test_imports.py # Quick import/tool registration test
+python scripts/test_imports.py # Quick import/tool registration test
 pytest tests/ -v      # Run pytest
 ```
 
@@ -103,12 +104,15 @@ pytest tests/ -v      # Run pytest
 
 | Component | Binary/Service | Notes |
 |-----------|---------------|-------|
-| STT | `whisper.cpp/build/bin/whisper-cli` | Built with `GGML_HIP=1` for ROCm |
+| STT | `faster-whisper` (Python) | Implemented in `server/stt/whisper.py` |
 | LLM | Ollama at `:11434` | Supports OpenAI-compatible backends |
-| TTS | `piper/piper/piper` | Voices: `amy`, `lessac`, `ryan` |
+| TTS | Piper (local) or Edge-TTS | See `server/tts/` for engines |
 | VAD | Silero (PyTorch) | Lazy-loaded singleton |
 
-GPU mapping: 0=RX6600 (display), 1=MI50#1 (STT), 2=MI50#2 (LLM)
+## Repo Hygiene
+
+- Treat `review/` as a staging area for moved artifacts/backups; do not “clean it up” further unless asked.
+- `docs/notes/` contains historical notes; prefer `docs/ARCHITECTURE.md` and `docs/DEVELOPMENT.md` for canonical behavior.
 
 ## Related MCP Servers
 
@@ -121,24 +125,17 @@ npm run dashboard # Web UI at :3000
 ```
 
 ### mcpower/ - Knowledge Vector Search
-External FAISS-based semantic search at `/home/stacy/mcpower`. Used by `knowledge_tools.py`:
+Optional external FAISS-based semantic search repo. Used by `server/tools/builtin/knowledge_tools.py`:
 - Datasets in `mcpower/datasets/<name>/` with `metadata.json` + `index/` folder
 - Uses sentence-transformers for embeddings
 - Tools: `knowledge_search(query, dataset)`, `list_knowledge_datasets()`
 
 ### OpenMemory - Long-term Agent Memory
-Cognitive memory system at `/home/stacy/openmemory`. Provides persistent memory across sessions.
+Cognitive memory system (optional) providing persistent memory across sessions.
 
-**Backend** (TypeScript/Node.js):
-```bash
-cd /home/stacy/openmemory/backend
-npx tsx src/server/index.ts  # Runs on port 8080
-```
+If enabled, the backend typically runs on port 8080.
 
-**Configuration** (`/home/stacy/openmemory/.env`):
-- `OM_EMBEDDINGS=ollama` - Uses local Ollama for embeddings
-- `OM_TIER=smart` - Balanced performance tier
-- `OLLAMA_URL=http://localhost:11434`
+Configuration is environment-driven (embedder, tier, Ollama URL).
 
 **Memory Tools** (`server/tools/builtin/memory_tools.py`):
 - `remember(content, tags, importance)` - Store a memory
@@ -195,7 +192,7 @@ npx tsx src/server/index.ts  # Runs on port 8080
 
 To add a new knowledge dataset for `knowledge_search()`:
 ```
-/home/stacy/mcpower/datasets/<dataset-name>/
+<mcpower>/datasets/<dataset-name>/
 ├── metadata.json    # Document list with titles, snippets, paths
 ├── manifest.json    # Optional: description, document_count
 └── index/
@@ -221,10 +218,10 @@ To add a new knowledge dataset for `knowledge_search()`:
 4. **Theme not applying**: CSS vars must be in `:root` or `[data-theme]` selectors
 5. **Tool not available**: Import module in `builtin/__init__.py` and restart
 6. **Knowledge search fails**: Ensure `faiss-cpu` and `sentence-transformers` installed
-7. **Memory tools fail**: Ensure OpenMemory backend is running on port 8080
-8. **Music tools fail**: Ensure MPD server is running (check with `systemctl --user status mpd` on Linux)
+7. **Memory tools missing**: OpenMemory integration is optional; enable only if the `openmemory` dependency + backend are available
+8. **Music tools missing**: MPD integration is optional; requires `python-mpd2` (module `mpd`) and an MPD server
 
-## Music Player - MPD Integration
+## Music Player - MPD Integration (Optional)
 
 Local music playback via Music Player Daemon (MPD). No external APIs or subscriptions.
 

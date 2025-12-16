@@ -1,7 +1,7 @@
 """
 Voice Agent Configuration
 Loads settings from environment variables with sensible defaults.
-Production-ready for AMD MI50 GPU acceleration.
+Runs on CPU by default and can use GPU acceleration when available (NVIDIA CUDA or AMD ROCm via the selected backend).
 """
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -12,11 +12,15 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
-    # STT Settings (faster-whisper with CUDA or whisper.cpp with ROCm)
+    # STT Settings (selectable backend)
+    stt_backend: Literal["faster-whisper", "whisper-cpp"] = Field(
+        default="faster-whisper",
+        description="STT backend: faster-whisper (default) or whisper-cpp",
+    )
     whisper_model: str = Field(default="large-v3-turbo", description="Whisper model name/size")
-    whisper_device: str = Field(default="cuda", description="Device: cuda, cpu, or auto")
+    whisper_device: str = Field(default="auto", description="Device: cuda, cpu, or auto")
     whisper_compute_type: str = Field(default="float16", description="Compute type: float16, int8, int8_float16")
-    whisper_gpu_device: int = Field(default=0, description="GPU device index for CUDA")
+    whisper_gpu_device: int = Field(default=0, description="GPU device index (used when whisper_device=cuda)")
     
     # LLM Settings
     llm_backend: Literal["ollama", "lmstudio", "openai"] = Field(default="ollama", description="LLM backend type")
@@ -52,6 +56,16 @@ class Settings(BaseSettings):
     # Tracing
     otel_enabled: bool = Field(default=False, description="Enable OpenTelemetry tracing")
     otel_endpoint: str = Field(default="http://localhost:4318/v1/traces", description="OTLP endpoint")
+
+    # Tools / Extensions
+    disabled_tool_modules: str = Field(
+        default="",
+        description="Comma-separated builtin tool module names to skip (e.g. 'music_tools,memory_tools')",
+    )
+    enabled_tool_packs: str = Field(
+        default="",
+        description="Comma-separated tool pack module names to load from server.tools.packs (e.g. 'flyouts_demo')",
+    )
     
     class Config:
         env_file = ".env"

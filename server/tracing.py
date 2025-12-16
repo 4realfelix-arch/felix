@@ -4,13 +4,36 @@ OpenTelemetry tracing setup for Voice Agent.
 Traces the full voice pipeline: STT → LLM → Tool Execution → TTS
 """
 
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.trace import Status, StatusCode
+from __future__ import annotations
+
+try:
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.trace import Status, StatusCode
+
+    _otel_available = True
+except ModuleNotFoundError:
+    trace = None
+    OTLPSpanExporter = None
+    HTTPXClientInstrumentor = None
+    Resource = None
+    TracerProvider = None
+    BatchSpanProcessor = None
+
+    class StatusCode:  # type: ignore[no-redef]
+        OK = 0
+        ERROR = 1
+
+    class Status:  # type: ignore[no-redef]
+        def __init__(self, status_code, description: str | None = None):
+            self.status_code = status_code
+            self.description = description
+
+    _otel_available = False
 from functools import wraps
 import structlog
 import os
@@ -18,14 +41,39 @@ import os
 logger = structlog.get_logger(__name__)
 
 # Global tracer instance
-_tracer: trace.Tracer | None = None
+_tracer = None
 _tracing_enabled: bool = False
+
+
+class _NoopSpan:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def set_attribute(self, key, value):
+        return None
+
+    def set_status(self, status):
+        return None
+
+    def record_exception(self, exc):
+        return None
+
+
+class _NoopTracer:
+    def start_as_current_span(self, name: str):
+        return _NoopSpan()
+
+    def start_span(self, name: str):
+        return _NoopSpan()
 
 
 def init_tracing(
     service_name: str = "voice-agent",
     otlp_endpoint: str = None
-) -> trace.Tracer:
+) -> object:
     """
     Initialize OpenTelemetry tracing.
     
@@ -39,6 +87,11 @@ def init_tracing(
     global _tracer, _tracing_enabled
     
     if _tracer is not None:
+        return _tracer
+
+    if not _otel_available:
+        _tracer = _NoopTracer()
+        logger.info("tracing_unavailable", reason="opentelemetry not installed")
         return _tracer
     
     # Check if tracing is enabled via environment or config

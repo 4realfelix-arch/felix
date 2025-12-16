@@ -5,9 +5,9 @@ This guide covers setting up and developing the Voice Agent project.
 ## Prerequisites
 
 - **Python 3.10+** - Core runtime
-- **AMD MI50 GPUs** - For STT/LLM acceleration (ROCm/HIP)
+- **GPU (optional)** - NVIDIA (CUDA) or AMD (ROCm/HIP) for acceleration; CPU-only works
 - **Ollama** - Local LLM runtime
-- **whisper.cpp** - Built with HIP support for ROCm
+- **faster-whisper** - STT (installed via `requirements.txt`)
 - **Piper TTS** - Local text-to-speech
 
 ## Development Setup
@@ -15,7 +15,7 @@ This guide covers setting up and developing the Voice Agent project.
 ### 1. Clone and Create Virtual Environment
 
 ```bash
-cd /home/stacy/voice-agent
+cd /path/to/felix
 python3 -m venv venv
 source venv/bin/activate
 ```
@@ -32,8 +32,8 @@ pip install -r requirements.txt
 # Check Ollama is running
 curl http://localhost:11434/api/tags
 
-# Check whisper.cpp binary
-./whisper.cpp/build/bin/whisper-cli --help
+# Check Python deps are importable
+python -c "import fastapi, faster_whisper"
 
 # Check Piper binary
 ./piper/piper/piper --help
@@ -49,8 +49,10 @@ cp .env.example .env
 
 Key variables:
 ```env
-WHISPER_MODEL=ggml-large-v3-turbo.bin
-WHISPER_GPU_DEVICE=1          # MI50 GPU index (0=RX6600, 1=MI50#1, 2=MI50#2)
+STT_BACKEND=faster-whisper      # faster-whisper|whisper-cpp
+WHISPER_MODEL=large-v3-turbo
+WHISPER_DEVICE=auto            # auto|cpu|cuda
+WHISPER_COMPUTE_TYPE=float16   # float16|int8|int8_float16
 OLLAMA_MODEL=llama3.2
 TTS_VOICE=amy                 # Piper voice: amy, lessac, ryan
 ```
@@ -60,7 +62,7 @@ TTS_VOICE=amy                 # Piper voice: amy, lessac, ryan
 ### Development Mode
 
 ```bash
-cd /home/stacy/voice-agent
+cd /path/to/felix
 source venv/bin/activate
 python -m server.main
 ```
@@ -88,7 +90,7 @@ voice-agent/
 │   │   ├── buffer.py        # Audio buffering
 │   │   └── pipeline.py      # Audio pipeline orchestration
 │   ├── stt/                  # Speech-to-text
-│   │   └── whisper_cpp.py   # whisper.cpp subprocess wrapper
+│   │   └── whisper.py       # faster-whisper integration
 │   ├── llm/                  # Language model
 │   │   ├── ollama.py        # Ollama async client
 │   │   └── conversation.py  # Conversation history
@@ -116,7 +118,7 @@ voice-agent/
 │
 ├── docs/                      # Documentation
 ├── piper/                     # Piper TTS binaries
-├── whisper.cpp/              # whisper.cpp build
+├── scripts/                   # Dev utilities (import/tool checks, troubleshooting)
 └── mcpart/                    # MCP server reference
 ```
 
@@ -234,7 +236,7 @@ initMyModule();
 ### Run Import Tests
 
 ```bash
-python test_imports.py
+python scripts/test_imports.py
 ```
 
 ### Test Individual Components
